@@ -1,0 +1,7 @@
+id: disk-encryption
+name: Disk Encryption Enabled
+description: Devices must have FileVault/LUKS enabled
+checks:
+  - key: disk.encrypted
+    op: eq
+    value: true

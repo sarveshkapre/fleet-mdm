@@ -1,0 +1,13 @@
+{
+  "device_id": "mac-001",
+  "hostname": "studio-1",
+  "os": "macos",
+  "os_version": "14.4",
+  "serial": "C02XYZ123",
+  "last_seen": "2026-02-01T15:30:00Z",
+  "facts": {
+    "disk": { "encrypted": true },
+    "cpu": { "cores": 8 },
+    "tags": ["prod", "design"]
+  }
+}
