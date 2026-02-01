@@ -58,9 +58,30 @@ CREATE TABLE IF NOT EXISTS scripts (
   updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS compliance_runs (
+  run_id TEXT PRIMARY KEY,
+  started_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS compliance_results (
+  run_id TEXT NOT NULL,
+  device_id TEXT NOT NULL,
+  policy_id TEXT NOT NULL,
+  policy_name TEXT NOT NULL,
+  status TEXT NOT NULL,
+  failed_checks TEXT NOT NULL,
+  checked_at TEXT NOT NULL,
+  PRIMARY KEY (run_id, device_id, policy_id),
+  FOREIGN KEY (run_id) REFERENCES compliance_runs(run_id) ON DELETE CASCADE,
+  FOREIGN KEY (device_id) REFERENCES devices(device_id) ON DELETE CASCADE,
+  FOREIGN KEY (policy_id) REFERENCES policies(policy_id) ON DELETE CASCADE
+);
+
 CREATE INDEX IF NOT EXISTS idx_devices_os ON devices(os);
 CREATE INDEX IF NOT EXISTS idx_policy_assignments_device ON policy_assignments(device_id);
 CREATE INDEX IF NOT EXISTS idx_policy_tag_assignments_tag ON policy_tag_assignments(tag);
+CREATE INDEX IF NOT EXISTS idx_compliance_results_device ON compliance_results(device_id);
+CREATE INDEX IF NOT EXISTS idx_compliance_results_policy ON compliance_results(policy_id);
 """
 
 
@@ -292,6 +313,78 @@ def add_script(
 
 def list_scripts(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return conn.execute("SELECT script_id, name, sha256, updated_at FROM scripts").fetchall()
+
+
+def create_compliance_run(conn: sqlite3.Connection) -> str:
+    run_id = f"run-{utc_now()}"
+    conn.execute(
+        "INSERT INTO compliance_runs (run_id, started_at) VALUES (?, ?)",
+        (run_id, utc_now()),
+    )
+    return run_id
+
+
+def add_compliance_result(
+    conn: sqlite3.Connection,
+    run_id: str,
+    device_id: str,
+    policy_id: str,
+    policy_name: str,
+    status: str,
+    failed_checks: str,
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO compliance_results (
+          run_id, device_id, policy_id, policy_name, status, failed_checks, checked_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (run_id, device_id, policy_id, policy_name, status, failed_checks, utc_now()),
+    )
+
+
+def list_compliance_history(
+    conn: sqlite3.Connection,
+    device_id: str | None,
+    policy_id: str | None,
+    limit: int,
+) -> list[sqlite3.Row]:
+    clauses: list[str] = []
+    params: list[str | int] = []
+    if device_id:
+        clauses.append("device_id = ?")
+        params.append(device_id)
+    if policy_id:
+        clauses.append("policy_id = ?")
+        params.append(policy_id)
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    query = f"""
+        SELECT run_id, device_id, policy_id, policy_name, status, failed_checks, checked_at
+        FROM compliance_results
+        {where}
+        ORDER BY checked_at DESC
+        LIMIT ?
+    """
+    params.append(limit)
+    return conn.execute(query, tuple(params)).fetchall()
+
+
+def list_recent_runs(conn: sqlite3.Connection, limit: int) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT run_id, started_at FROM compliance_runs ORDER BY started_at DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+
+
+def list_results_for_run(conn: sqlite3.Connection, run_id: str) -> list[sqlite3.Row]:
+    return conn.execute(
+        """
+        SELECT device_id, policy_id, policy_name, status, failed_checks, checked_at
+        FROM compliance_results
+        WHERE run_id = ?
+        """,
+        (run_id,),
+    ).fetchall()
 
 
 def export_inventory(conn: sqlite3.Connection) -> list[dict[str, Any]]:

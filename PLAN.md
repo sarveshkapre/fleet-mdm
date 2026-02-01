@@ -21,9 +21,10 @@ Local-first, single-tenant FleetMDM controller for inventory ingest, policy chec
 - Tag-based policy assignments (`policy assign --tag`)
 - Assignment introspection and removal (`policy assignments`, `policy unassign`)
 - Inventory JSON schema export (`schema inventory`) + stricter ingest validation
+- Compliance history + drift (`history`, `drift`)
 
 ## Next to ship
 - More inventory exporters + examples
 - Policy targets/scoping semantics in YAML (optional)
 - Inventory drift hardening (better error surfaces, import dedupe)
-- Compliance history and drift tracking
+- Compliance drift filtering (by device/policy)

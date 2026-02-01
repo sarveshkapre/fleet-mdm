@@ -77,6 +77,13 @@ assignments exist, all policies apply to all devices.
 - Inventory schema: `fleetmdm schema inventory --output inventory.schema.json`
 - Validate an inventory JSON file: `fleetmdm inventory validate examples/device.json`
 
+### History
+- Recent results: `fleetmdm history --device mac-001 --limit 20`
+- Filter by policy: `fleetmdm history --policy disk-encryption`
+
+### Drift
+- Compare last two runs: `fleetmdm drift`
+
 ## Docker
 ```bash
 docker build -t fleetmdm .

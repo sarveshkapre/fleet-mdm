@@ -21,11 +21,13 @@ from fleetmdm.policy import (
 )
 from fleetmdm.report import render_csv, render_json, render_table
 from fleetmdm.store import (
+    add_compliance_result,
     add_policy,
     add_script,
     assign_policy,
     assign_policy_to_tag,
     connect,
+    create_compliance_run,
     device_exists,
     export_inventory,
     get_device_facts,
@@ -34,10 +36,13 @@ from fleetmdm.store import (
     has_any_policy_assignments,
     ingest_devices,
     init_db,
+    list_compliance_history,
     list_devices,
     list_policies,
     list_policy_assignments_for_device,
     list_policy_assignments_for_tag,
+    list_recent_runs,
+    list_results_for_run,
     list_scripts,
     policy_exists,
     resolve_assigned_policies_for_device,
@@ -55,6 +60,8 @@ OPT_OUTPUT = typer.Option(None, "--output", help="Write JSON to file")
 OPT_DEVICE = typer.Option(..., "--device", help="Device ID")
 OPT_DEVICE_OPTIONAL = typer.Option(None, "--device", help="Device ID")
 OPT_NAME = typer.Option(None, "--name", help="Script name")
+OPT_POLICY_ID_OPTIONAL = typer.Option(None, "--policy", help="Policy ID")
+OPT_LIMIT = typer.Option(50, "--limit", help="Limit rows")
 
 app = typer.Typer(help="FleetMDM CLI", add_completion=False)
 inventory_app = typer.Typer(help="Inventory tools")
@@ -407,6 +414,7 @@ def check(
         assignment_mode = has_any_policy_assignments(conn)
         policy_rows = list_policies(conn)
         all_policy_ids = [str(row["policy_id"]) for row in policy_rows]
+        run_id = create_compliance_run(conn)
         devices = [row["device_id"] for row in list_devices(conn)]
         if device_id:
             if not device_exists(conn, device_id):
@@ -445,7 +453,18 @@ def check(
                 if not raw_yaml:
                     continue
                 policy = load_policy(raw_yaml)
-                policy_results.append(evaluate_policy(policy, facts))
+                result = evaluate_policy(policy, facts)
+                policy_results.append(result)
+                failed = [c.key for c in result.checks if not c.passed]
+                add_compliance_result(
+                    conn,
+                    run_id,
+                    did,
+                    result.policy_id,
+                    result.policy_name,
+                    "pass" if result.passed else "fail",
+                    ", ".join(failed),
+                )
 
             if not policy_results:
                 if device_id:
@@ -550,6 +569,119 @@ def report(
     table.add_column("Fail")
     for row in summary.values():
         table.add_row(row["policy_name"], str(row["pass"]), str(row["fail"]))
+    console.print(table)
+
+
+@app.command()
+def history(
+    device_id: str | None = OPT_DEVICE_OPTIONAL,
+    policy_id: str | None = OPT_POLICY_ID_OPTIONAL,
+    limit: int = OPT_LIMIT,
+    format: str = typer.Option("table", "--format", help="table/json/csv"),
+    db: str | None = OPT_DB,
+) -> None:
+    """Show compliance history."""
+    db_path = resolve_db_path(db)
+    init_db(db_path)
+    with connect(db_path) as conn:
+        rows = list_compliance_history(conn, device_id, policy_id, limit)
+
+    if format == "json":
+        console.print(json.dumps([dict(row) for row in rows], indent=2))
+        return
+    if format == "csv":
+        lines = ["run_id,device_id,policy_id,policy_name,status,failed_checks,checked_at"]
+        for row in rows:
+            lines.append(
+                f"{row['run_id']},{row['device_id']},{row['policy_id']},"
+                f"{row['policy_name']},{row['status']},{row['failed_checks']},"
+                f"{row['checked_at']}"
+            )
+        console.print("\n".join(lines))
+        return
+
+    table = Table(title="Compliance History")
+    table.add_column("Run")
+    table.add_column("Device")
+    table.add_column("Policy")
+    table.add_column("Status")
+    table.add_column("Failed Checks")
+    table.add_column("Checked At")
+    for row in rows:
+        table.add_row(
+            row["run_id"],
+            row["device_id"],
+            row["policy_name"],
+            row["status"],
+            row["failed_checks"],
+            row["checked_at"],
+        )
+    console.print(table)
+
+
+@app.command()
+def drift(
+    format: str = typer.Option("table", "--format", help="table/json/csv"),
+    db: str | None = OPT_DB,
+) -> None:
+    """Compare the last two compliance runs and show status changes."""
+    db_path = resolve_db_path(db)
+    init_db(db_path)
+    with connect(db_path) as conn:
+        runs = list_recent_runs(conn, 2)
+        if len(runs) < 2:
+            console.print("Need at least two compliance runs to calculate drift")
+            raise typer.Exit(code=1)
+        latest_run = runs[0]["run_id"]
+        previous_run = runs[1]["run_id"]
+        latest = list_results_for_run(conn, latest_run)
+        previous = list_results_for_run(conn, previous_run)
+
+    latest_map = {
+        (row["device_id"], row["policy_id"]): row["status"] for row in latest
+    }
+    previous_map = {
+        (row["device_id"], row["policy_id"]): row["status"] for row in previous
+    }
+
+    changes = []
+    for key, current in latest_map.items():
+        previous_status = previous_map.get(key)
+        if previous_status is None:
+            continue
+        if previous_status != current:
+            device_id, policy_id = key
+            changes.append(
+                {
+                    "device_id": device_id,
+                    "policy_id": policy_id,
+                    "previous": previous_status,
+                    "current": current,
+                }
+            )
+
+    if format == "json":
+        console.print(json.dumps(changes, indent=2))
+        return
+    if format == "csv":
+        lines = ["device_id,policy_id,previous,current"]
+        for row in changes:
+            lines.append(
+                f"{row['device_id']},{row['policy_id']},{row['previous']},{row['current']}"
+            )
+        console.print("\n".join(lines))
+        return
+
+    table = Table(title="Compliance Drift (last two runs)")
+    table.add_column("Device")
+    table.add_column("Policy")
+    table.add_column("Previous")
+    table.add_column("Current")
+    if not changes:
+        table.add_row("(none)", "", "", "")
+    else:
+        for row in changes:
+            table.add_row(row["device_id"], row["policy_id"], row["previous"], row["current"])
     console.print(table)
 
 

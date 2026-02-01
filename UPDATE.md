@@ -13,6 +13,11 @@
   - `python3 examples/exporters/macos_inventory.py > device.json`
   - `python3 examples/exporters/linux_inventory.py > device.json`
   - `fleetmdm inventory validate device.json`
+- Compliance history is now recorded on every `check`, with a CLI viewer:
+  - `fleetmdm history --device <device_id>`
+  - `fleetmdm history --policy <policy_id> --limit 20`
+- Drift report compares the last two runs:
+  - `fleetmdm drift`
 
 ## Notes
 - When any assignments exist (device or tag), `check` and `report` evaluate only assigned policies; if no
