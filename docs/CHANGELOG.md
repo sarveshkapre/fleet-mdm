@@ -7,3 +7,4 @@
 - Add sample inventory exporters (macOS/Linux) under `examples/exporters/` and `fleetmdm inventory validate`
 - Add compliance history recording + `fleetmdm history`
 - Add compliance drift report: `fleetmdm drift`
+- Add policy targets for OS/tags in YAML

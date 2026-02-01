@@ -17,6 +17,7 @@ from fleetmdm.policy import (
     evaluate_policy,
     load_policy,
     load_policy_from_file,
+    policy_matches_targets,
     validate_policy_file,
 )
 from fleetmdm.report import render_csv, render_json, render_table
@@ -30,6 +31,7 @@ from fleetmdm.store import (
     create_compliance_run,
     device_exists,
     export_inventory,
+    get_device,
     get_device_facts,
     get_policy_yaml,
     get_tag_assigned_policies,
@@ -431,6 +433,9 @@ def check(
             facts = get_device_facts(conn, did)
             if facts is None:
                 continue
+            device = get_device(conn, did)
+            if device is None:
+                continue
 
             tags = _extract_device_tags(facts)
             policy_ids = (
@@ -453,6 +458,8 @@ def check(
                 if not raw_yaml:
                     continue
                 policy = load_policy(raw_yaml)
+                if not policy_matches_targets(policy, dict(device), facts):
+                    continue
                 result = evaluate_policy(policy, facts)
                 policy_results.append(result)
                 failed = [c.key for c in result.checks if not c.passed]
@@ -534,6 +541,7 @@ def report(
 
         for device in device_rows:
             facts = get_device_facts(conn, device["device_id"]) or {}
+            device_data = dict(device)
             tags = _extract_device_tags(facts)
             applicable = (
                 resolve_assigned_policies_for_device(conn, device["device_id"], tags)
@@ -547,6 +555,8 @@ def report(
                 if not raw_yaml:
                     continue
                 policy = load_policy(raw_yaml)
+                if not policy_matches_targets(policy, device_data, facts):
+                    continue
                 result = evaluate_policy(policy, facts)
                 if result.passed:
                     summary[pid]["pass"] += 1

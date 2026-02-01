@@ -285,6 +285,14 @@ def list_devices(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     ).fetchall()
 
 
+def get_device(conn: sqlite3.Connection, device_id: str) -> sqlite3.Row | None:
+    query = (
+        "SELECT device_id, hostname, os, os_version, serial, last_seen "
+        "FROM devices WHERE device_id = ?"
+    )
+    return conn.execute(query, (device_id,)).fetchone()
+
+
 def get_device_facts(conn: sqlite3.Connection, device_id: str) -> dict[str, Any] | None:
     row = conn.execute(
         "SELECT facts_json FROM device_facts WHERE device_id = ?", (device_id,)

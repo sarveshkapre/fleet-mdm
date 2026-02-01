@@ -68,6 +68,49 @@ def load_policy(raw_yaml: str) -> Policy:
     return policy
 
 
+def policy_matches_targets(
+    policy: Policy, device: dict[str, Any], facts: dict[str, Any]
+) -> bool:
+    targets = policy.targets or {}
+    if not targets:
+        return True
+
+    os_target = targets.get("os")
+    if os_target:
+        os_values: list[str]
+        if isinstance(os_target, str):
+            os_values = [os_target]
+        elif isinstance(os_target, list):
+            os_values = [str(item) for item in os_target]
+        else:
+            return False
+        device_os = str(device.get("os", "")).lower()
+        if device_os not in {value.lower() for value in os_values}:
+            return False
+
+    tags_target = targets.get("tags")
+    if tags_target:
+        if isinstance(tags_target, str):
+            required = {tags_target.strip().lower()}
+        elif isinstance(tags_target, list):
+            required = {str(item).strip().lower() for item in tags_target if str(item).strip()}
+        else:
+            return False
+        device_tags = facts.get("tags") or []
+        if isinstance(device_tags, str):
+            device_tag_set = {device_tags.strip().lower()}
+        elif isinstance(device_tags, list):
+            device_tag_set = {
+                str(item).strip().lower() for item in device_tags if str(item).strip()
+            }
+        else:
+            device_tag_set = set()
+        if required.isdisjoint(device_tag_set):
+            return False
+
+    return True
+
+
 def load_policy_from_file(path: str) -> tuple[Policy, str]:
     with open(path, encoding="utf-8") as handle:
         raw_yaml = handle.read()

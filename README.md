@@ -47,6 +47,9 @@ See `examples/exporters/`.
 id: disk-encryption
 name: Disk Encryption Enabled
 description: Devices must have FileVault/LUKS enabled
+targets:
+  os: macos
+  tags: [prod, design]
 checks:
   - key: disk.encrypted
     op: eq
@@ -54,6 +57,10 @@ checks:
 ```
 
 Supported operators: `eq`, `ne`, `lt`, `lte`, `gt`, `gte`, `contains`, `in`, `not_in`, `regex`, `version_gte`, `version_lte`.
+
+Targets (optional):
+- `os`: string or list of OS names (e.g., `macos`, `linux`)
+- `tags`: string or list of tags; policy applies if any tag matches
 
 ## Example workflow
 ```bash

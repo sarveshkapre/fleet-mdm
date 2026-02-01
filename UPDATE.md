@@ -18,6 +18,7 @@
   - `fleetmdm history --policy <policy_id> --limit 20`
 - Drift report compares the last two runs:
   - `fleetmdm drift`
+- Policy YAML now supports `targets` (OS/tags) to scope applicability.
 
 ## Notes
 - When any assignments exist (device or tag), `check` and `report` evaluate only assigned policies; if no

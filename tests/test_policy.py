@@ -8,6 +8,9 @@ def test_policy_eval_pass() -> None:
         """
         id: disk-encryption
         name: Disk Encryption Enabled
+        targets:
+          os: macos
+          tags: [prod]
         checks:
           - key: disk.encrypted
             op: eq
@@ -19,7 +22,7 @@ def test_policy_eval_pass() -> None:
     ).strip()
 
     policy = load_policy(policy_yaml)
-    facts = {"disk": {"encrypted": True}, "os_version": "14.4"}
+    facts = {"disk": {"encrypted": True}, "os_version": "14.4", "tags": ["prod"]}
     result = evaluate_policy(policy, facts)
 
     assert result.passed is True

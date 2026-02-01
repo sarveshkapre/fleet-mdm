@@ -1,6 +1,9 @@
 id: disk-encryption
 name: Disk Encryption Enabled
 description: Devices must have FileVault/LUKS enabled
+targets:
+  os: macos
+  tags: [prod, design]
 checks:
   - key: disk.encrypted
     op: eq
