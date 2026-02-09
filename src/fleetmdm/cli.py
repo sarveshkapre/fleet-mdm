@@ -63,6 +63,7 @@ from fleetmdm.store import (
     resolve_db_path,
     unassign_policy,
     unassign_policy_from_tag,
+    utc_now,
 )
 
 ARG_DEVICE_JSON = typer.Argument(..., exists=True, readable=True, help="Device JSON file")
@@ -565,7 +566,7 @@ def ingest(
     with connect(db_path) as conn:
         for device in devices:
             if not device.get("last_seen"):
-                device["last_seen"] = conn.execute("SELECT datetime('now')").fetchone()[0]
+                device["last_seen"] = utc_now()
         count = ingest_devices(conn, devices)
     console.print(f"Ingested {count} device(s)")
 
@@ -624,6 +625,7 @@ def policy_list(
 ) -> None:
     """List policies."""
     db_path = resolve_db_path(db)
+    init_db(db_path)
     with connect(db_path) as conn:
         rows = list_policies(conn)
     table = Table(title="Policies")
@@ -1866,7 +1868,7 @@ def seed(
     with connect(db_path) as conn:
         for device in sample_devices:
             if not device.get("last_seen"):
-                device["last_seen"] = conn.execute("SELECT datetime('now')").fetchone()[0]
+                device["last_seen"] = utc_now()
         ingest_devices(conn, sample_devices)
         policy = load_policy(policy_yaml)
         add_policy(conn, policy.id, policy.name, policy.description, policy_yaml)

@@ -138,3 +138,110 @@ def test_list_compliance_history_filters(tmp_path: Path) -> None:
     assert len(device_policy_rows) == 1
     assert str(device_policy_rows[0]["device_id"]) == "mac-001"
     assert str(device_policy_rows[0]["policy_id"]) == "disk-encryption"
+
+
+def test_ingest_devices_skips_stale_last_seen(tmp_path: Path) -> None:
+    db_path = tmp_path / "fleet.db"
+    init_db(db_path)
+
+    newer = [
+        {
+            "device_id": "mac-001",
+            "hostname": "studio-1",
+            "os": "macos",
+            "os_version": "14.4",
+            "serial": "C02XYZ123",
+            "last_seen": "2026-02-02T00:00:00Z",
+            "facts": {"disk": {"encrypted": True}},
+        }
+    ]
+    older = [
+        {
+            "device_id": "mac-001",
+            "hostname": "studio-1",
+            "os": "macos",
+            "os_version": "14.4",
+            "serial": "C02XYZ123",
+            "last_seen": "2026-02-01T00:00:00Z",
+            "facts": {"disk": {"encrypted": False}},
+        }
+    ]
+
+    with connect(db_path) as conn:
+        ingest_devices(conn, newer)
+        ingest_devices(conn, older)
+        exported = export_inventory(conn)
+
+    assert exported[0]["device_id"] == "mac-001"
+    assert exported[0]["facts"]["disk"]["encrypted"] is True
+    assert exported[0]["last_seen"].startswith("2026-02-02T00:00:00")
+
+
+def test_ingest_devices_does_not_overwrite_known_last_seen_with_unknown(tmp_path: Path) -> None:
+    db_path = tmp_path / "fleet.db"
+    init_db(db_path)
+
+    known = [
+        {
+            "device_id": "mac-001",
+            "hostname": "studio-1",
+            "os": "macos",
+            "os_version": "14.4",
+            "serial": "C02XYZ123",
+            "last_seen": "2026-02-02T00:00:00Z",
+            "facts": {"disk": {"encrypted": True}},
+        }
+    ]
+    unknown = [
+        {
+            "device_id": "mac-001",
+            "hostname": "studio-1",
+            "os": "macos",
+            "os_version": "14.4",
+            "serial": "C02XYZ123",
+            "last_seen": "",
+            "facts": {"disk": {"encrypted": False}},
+        }
+    ]
+
+    with connect(db_path) as conn:
+        ingest_devices(conn, known)
+        ingest_devices(conn, unknown)
+        exported = export_inventory(conn)
+
+    assert exported[0]["facts"]["disk"]["encrypted"] is True
+    assert exported[0]["last_seen"].startswith("2026-02-02T00:00:00")
+
+
+def test_ingest_devices_dedupes_same_device_id_by_latest_last_seen(tmp_path: Path) -> None:
+    db_path = tmp_path / "fleet.db"
+    init_db(db_path)
+
+    payload = [
+        {
+            "device_id": "mac-001",
+            "hostname": "studio-1",
+            "os": "macos",
+            "os_version": "14.4",
+            "serial": "C02XYZ123",
+            "last_seen": "2026-02-01T00:00:00Z",
+            "facts": {"cpu": {"cores": 4}},
+        },
+        {
+            "device_id": "mac-001",
+            "hostname": "studio-1",
+            "os": "macos",
+            "os_version": "14.4",
+            "serial": "C02XYZ123",
+            "last_seen": "2026-02-02T00:00:00Z",
+            "facts": {"cpu": {"cores": 8}},
+        },
+    ]
+
+    with connect(db_path) as conn:
+        count = ingest_devices(conn, payload)
+        exported = export_inventory(conn)
+
+    assert count == 1
+    assert exported[0]["facts"]["cpu"]["cores"] == 8
+    assert exported[0]["last_seen"].startswith("2026-02-02T00:00:00")

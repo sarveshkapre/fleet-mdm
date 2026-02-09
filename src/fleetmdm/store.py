@@ -89,6 +89,20 @@ def utc_now() -> str:
     return datetime.now(tz=timezone.utc).isoformat()
 
 
+def _parse_last_seen(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if text.endswith(("Z", "z")):
+        text = f"{text[:-1]}+00:00"
+    dt = datetime.fromisoformat(text)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
 def resolve_db_path(path: str | None) -> Path:
     target = path or DEFAULT_DB_PATH
     expanded = os.path.expanduser(target)
@@ -484,9 +498,66 @@ def export_inventory(conn: sqlite3.Connection) -> list[dict[str, Any]]:
 
 
 def ingest_devices(conn: sqlite3.Connection, devices: Iterable[dict[str, Any]]) -> int:
-    count = 0
+    # Dedupe within a single payload to avoid flip-flopping state when the same device_id appears
+    # multiple times. Prefer the newest last_seen; treat missing/blank as "unknown".
+    best: dict[str, dict[str, Any]] = {}
+    best_seen: dict[str, datetime | None] = {}
+
     for device in devices:
+        device_id = str(device["device_id"])
+        candidate = dict(device)
+        candidate_seen = _parse_last_seen(candidate.get("last_seen"))
+
+        if device_id not in best:
+            best[device_id] = candidate
+            best_seen[device_id] = candidate_seen
+            continue
+
+        existing_seen = best_seen.get(device_id)
+        choose_candidate = False
+        if existing_seen is None:
+            choose_candidate = True
+        elif existing_seen is not None and candidate_seen is not None:
+            choose_candidate = candidate_seen >= existing_seen
+
+        if choose_candidate:
+            best[device_id] = candidate
+            best_seen[device_id] = candidate_seen
+
+    count = 0
+    for device_id in sorted(best.keys()):
+        device = best[device_id]
+        incoming_seen = best_seen.get(device_id)
+        if incoming_seen is not None:
+            device["last_seen"] = incoming_seen.isoformat()
+        else:
+            device["last_seen"] = str(device.get("last_seen") or "").strip()
+
+        row = conn.execute(
+            "SELECT last_seen FROM devices WHERE device_id = ?",
+            (device_id,),
+        ).fetchone()
+
+        if row is not None:
+            existing_raw = row["last_seen"]
+            try:
+                existing_seen = _parse_last_seen(existing_raw)
+            except ValueError:
+                existing_seen = None
+
+            # Do not allow missing/unknown last_seen to overwrite a known last_seen.
+            if incoming_seen is None and existing_seen is not None:
+                continue
+            # Do not allow stale ingests to roll back device state.
+            if (
+                incoming_seen is not None
+                and existing_seen is not None
+                and incoming_seen < existing_seen
+            ):
+                continue
+
         upsert_device(conn, device)
-        upsert_device_facts(conn, device["device_id"], device.get("facts", {}))
+        upsert_device_facts(conn, device_id, device.get("facts", {}))
         count += 1
+
     return count
