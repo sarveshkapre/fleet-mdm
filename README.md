@@ -91,6 +91,10 @@ assignments exist, all policies apply to all devices.
 ### Drift
 - Compare last two runs: `fleetmdm drift`
 
+### Evidence Packs
+- Export SOC-style evidence artifacts: `fleetmdm evidence export --output evidence/`
+- Bundle includes: `metadata.json`, `inventory.json`, `policies.json`, `assignments.json`, `latest_run.json`, `drift.json`
+
 ## Docker
 ```bash
 docker build -t fleetmdm .

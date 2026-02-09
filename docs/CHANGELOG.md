@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased (2026-02-09)
+- Add `fleetmdm evidence export` to generate SOC-style evidence bundles (`metadata`, `inventory`, `policies`, `assignments`, `latest_run`, `drift`).
+- Fix CI environment parity: `make` now works with or without a local `.venv`, and GitHub Actions uses `make setup`.
+- Fix `fleetmdm script list` on fresh databases by ensuring schema initialization.
+- Harden security gate by removing `assert`-based CLI control flow and refactoring SQL paths to satisfy Bandit.
+- Evaluate policies against merged device + facts context so checks like `os_version` work without duplicating values in facts.
+
 ## 0.1.0
 - Initial MVP: inventory ingest, policy validation, compliance checks, reporting, script catalog
 - Add policy assignments: device + tag, plus `policy assignments` and `policy unassign`
