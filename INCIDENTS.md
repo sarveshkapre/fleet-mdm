@@ -1,5 +1,35 @@
 # Incidents
 
+## 2026-02-09 - Local Smoke Failure: `make dev` Used Non-Executable Package Module
+- Summary:
+  Local smoke verification failed because `make dev` ran `python -m fleetmdm`, but the package has no `__main__`.
+- Impact:
+  `make dev` (documented in `docs/PROJECT.md`) was broken on a fresh environment; this increases friction for new contributors and automation smoke paths.
+- Root Cause:
+  Makefile assumed package-module execution (`python -m fleetmdm`) instead of the supported entrypoints (`fleetmdm` console script / `python -m fleetmdm.cli`).
+- Detection:
+  Local smoke run error: `No module named fleetmdm.__main__`.
+- Prevention Rules:
+  Keep `make dev` as a real smoke target and include it in manual smoke verification.
+  For Typer CLIs, prefer `python -m <package>.cli` (or the console script) unless a `__main__.py` is explicitly added and tested.
+- Status:
+  Fixed on `main` by switching `make dev` to `python -m fleetmdm.cli --help`.
+
+## 2026-02-09 - Local Security Gate Failure: Bandit B608 on Dynamic SQL Assembly
+- Summary:
+  `make security` failed after introducing a dynamically constructed SQL query in `list_results_for_run` (Bandit B608).
+- Impact:
+  Would have caused CI `security` job failures if pushed; caught before release.
+- Root Cause:
+  Query string was assembled using string formatting, triggering Bandit’s SQL injection heuristic even though parameters were bound.
+- Detection:
+  Local `make security` failure with B608 pointing at `src/fleetmdm/store.py`.
+- Prevention Rules:
+  Avoid string-built SQL in security-gated code paths; use explicit static query variants with bound parameters.
+  Run `make security` before pushing changes that touch SQL/query code.
+- Status:
+  Refactored to explicit query branches; `make security` passes.
+
 ## 2026-02-09 - Historical CI Environment Parity Failure
 - Summary:
   Multiple GitHub Actions runs failed because `make` invoked `.venv/bin/python` while CI dependencies were installed into system Python on those commits.

@@ -1,5 +1,68 @@
 # Project Memory
 
+## 2026-02-09 - Cycle 5 - Report/Drift Filters + Exporter Parity
+- Recent Decisions:
+  Add `report --policy/--device` filters, add `drift --device` and include `policy_name` in drift output, fix `make dev` to run the real CLI module, and enrich exporter examples (macOS Software Update preferences; Linux kernel + disk encryption heuristics).
+- Why:
+  Scale workflows need “reduce noise” knobs (`--policy`, `--device`) and drift needs to be readable without cross-referencing IDs.
+  Exporters are the fastest path to usable real-world facts, and `make dev` should match docs and work on a fresh checkout.
+- Evidence:
+  `src/fleetmdm/cli.py`, `src/fleetmdm/store.py`, `tests/test_cli.py`, `README.md`, `Makefile`,
+  `examples/exporters/macos_inventory.py`, `examples/exporters/linux_inventory.py`, `examples/exporters/README.md`,
+  `docs/CHANGELOG.md`, `docs/PROJECT.md`, `docs/ROADMAP.md`.
+- Verification Evidence:
+  `make check` (pass)
+  `make security` (pass; Bandit clean, pip-audit clean)
+  Exporter validation (pass):
+  ```bash
+  tmpdir=$(mktemp -d)
+  python3 examples/exporters/macos_inventory.py > "$tmpdir/device.json"
+  fleetmdm inventory validate "$tmpdir/device.json"
+  ```
+  Smoke (pass):
+  ```bash
+  tmpdir=$(mktemp -d)
+  db="$tmpdir/fleet.db"
+
+  fleetmdm init --db "$db"
+  fleetmdm ingest examples/device.json --db "$db"
+  fleetmdm policy add examples/policy.yaml --db "$db"
+  fleetmdm check --device mac-001 --db "$db" >/dev/null
+
+  cp examples/device.json "$tmpdir/device2.json"
+  python3 - "$tmpdir/device2.json" <<'PY'
+  import json,sys
+  p=sys.argv[1]
+  obj=json.load(open(p))
+  obj.setdefault("facts",{}).setdefault("disk",{})["encrypted"]=False
+  json.dump(obj,open(p,"w"),indent=2)
+  PY
+  fleetmdm ingest "$tmpdir/device2.json" --db "$db" >/dev/null
+  fleetmdm check --device mac-001 --db "$db" >/dev/null
+
+  fleetmdm drift --device mac-001 --format json --db "$db" >/dev/null
+  fleetmdm report --format json --policy disk-encryption --db "$db" >/dev/null
+  ```
+- Mistakes And Fixes:
+  - Root cause: `Makefile` `dev` target ran `python -m fleetmdm` but the package has no `__main__` (the supported entrypoints are the `fleetmdm` console script and `python -m fleetmdm.cli`).
+  - Fix: update `make dev` to run `python -m fleetmdm.cli --help`.
+  - Prevention: run `make dev` as part of local smoke verification, and avoid relying on implicit package `__main__` for Typer CLIs.
+  - Root cause: introduced a dynamically constructed SQL query string for `list_results_for_run`, which triggered Bandit B608.
+  - Fix: refactor to explicit static query branches for each filter combination.
+  - Prevention: avoid string-built SQL in security-gated code paths; prefer explicit query branches with bound parameters.
+- Commits:
+  `e45701d`, `cf1cc75`.
+- CI:
+  GitHub Actions runs `21845301456` (success) and `21845387000` (success).
+- Confidence:
+  High.
+- Trust Label:
+  `verified-local`.
+- Market scan (bounded, untrusted):
+  - FleetDM positions automation-first fleet visibility and MDM flows as table-stakes, including structured export/reporting via `fleetctl`. https://fleetdm.com/docs
+  - Jamf Pro’s compliance benchmarks explicitly call out report exports and “audit documentation” as part of the compliance workflow. https://support.jamf.com/en/articles/10932419-compliance-benchmarks-faq
+  - Jamf’s Conduit docs emphasize manual and scheduled exports as a baseline expectation for inventory/report flows. https://docs.jamf.com/jamf-pro-conduit/2.40.0/Exporting_Data_with_the_Jamf_Pro_Conduit.html
+
 ## 2026-02-09 - Cycle 4 - Scaling UX + SARIF + Doctor
 - Recent Decisions:
   Add scaling filters (`history --since`, `drift --since`, `drift --policy`), add `report --format sarif`,

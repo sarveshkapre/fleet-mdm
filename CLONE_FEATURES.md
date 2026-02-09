@@ -61,6 +61,7 @@
 - `--since` and drift filters are cheap, high-value scale features: they keep history/drift usable once you have frequent runs.
 - SARIF output makes FleetMDM results first-class in code-scanning/compliance pipelines without forcing a hosted service.
 - A lightweight `doctor` command reduces operational friction (DB size, counts, pragmas, index visibility) and makes troubleshooting repeatable.
+- Market scan signals that exportable audit artifacts and scheduled exports are baseline expectations; CLI filters + machine-readable outputs are high leverage.
 
 ## Notes
 - This file is maintained by the autonomous clone loop.
