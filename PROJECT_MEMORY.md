@@ -34,7 +34,7 @@
   fleetmdm evidence verify evidence --keyring-dir keys --format json | python -c 'import json,sys; r=json.load(sys.stdin); assert r["ok"] is True and r["signature"]["verified"] is True'
   ```
 - Commit:
-  `943b662` (feature + tests), `a5c7f63` (docs + trackers).
+  `943b662` (feature + tests), `a5c7f63` (docs + trackers), `791b218` (CI gitleaks fix).
 - Confidence:
   High.
 - Trust Label:
@@ -43,6 +43,7 @@
   - FleetDM: export formats and reporting expectations (CSV/JSON). https://fleetdm.com/docs/using-fleet/fleetctl-cli#export
   - Chef InSpec: machine-readable reporters (JSON/JUnit) as baseline for compliance tooling. https://docs.chef.io/inspec/reporters/
   - OpenSCAP: standardized assessment result formats (ARF) as an audit pipeline reference point. https://www.open-scap.org/tools/openscap-base/
+  - Note: One CI failure in this cycle was caused by `gitleaks-action@v2` enforcing a license key; the workflow was updated to install and run pinned OSS gitleaks instead. (trusted: local diff + GitHub CI follow-up)
 
 ## 2026-02-09 - Cycle 2 - Evidence Trust Hardening
 - Decision:
