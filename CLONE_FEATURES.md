@@ -7,13 +7,17 @@
 - Gaps found during codebase exploration
 
 ## Candidate Features To Do
-- [ ] P0 - Track repo-wide `AGENTS.md` contract (currently untracked) and keep it aligned with `docs/AGENTS.md`.
-- [ ] P1 - Add key rotation and key-ID management workflow for evidence manifest signing (keygen + keyring verify).
-- [ ] P1 - Add detached verification report output (`fleetmdm evidence verify --format json`) for audit pipeline ingestion.
-- [ ] P2 - Add evidence export redaction config for sensitive inventory facts fields (allowlist/denylist of dot-paths).
-- [ ] P3 - Update `docs/PROJECT.md` “Next 3 improvements” to reflect current roadmap (evidence key lifecycle + verify reports + redaction controls).
+- [ ] P1 - Add key lifecycle metadata for evidence signing (key activation dates, revocation, and keyring manifests).
+- [ ] P2 - Add `fleetmdm evidence verify --output <file>` for CI/audit pipelines that want an artifact instead of stdout.
+- [ ] P2 - Extend evidence redaction controls beyond inventory facts (for example, policy YAML `raw_yaml` redaction / stripping comments).
+- [ ] P3 - Optional read-only web dashboard for inventory + compliance + evidence verification status.
 
 ## Implemented
+- [x] 2026-02-09 - Tracked repo-wide `AGENTS.md` contract and refreshed session task tracker. Evidence: `AGENTS.md`, `CLONE_FEATURES.md`.
+- [x] 2026-02-09 - Evidence signing key rotation workflow: add `fleetmdm evidence keygen` and `evidence verify --keyring-dir` (key-ID selection). Evidence: `src/fleetmdm/cli.py`, `tests/test_cli.py`, `README.md`.
+- [x] 2026-02-09 - Machine-readable evidence verification report output: `fleetmdm evidence verify --format json`. Evidence: `src/fleetmdm/cli.py`, `tests/test_cli.py`, smoke run.
+- [x] 2026-02-09 - Evidence export facts redaction config (`--redact-config` allowlist/denylist). Evidence: `src/fleetmdm/cli.py`, `tests/test_cli.py`, `README.md`.
+- [x] 2026-02-09 - Updated `docs/PROJECT.md` improvement list to reflect shipped roadmap. Evidence: `docs/PROJECT.md`.
 - [x] 2026-02-09 - CI/tooling parity fix: `Makefile` now falls back to `python3` when `.venv` is absent and CI uses `make setup`. Evidence: `Makefile`, `.github/workflows/ci.yml`.
 - [x] 2026-02-09 - Security gate fixes: removed `assert` control flow in CLI and refactored Bandit-flagged SQL query construction. Evidence: `src/fleetmdm/cli.py`, `src/fleetmdm/store.py`, `make security`.
 - [x] 2026-02-09 - Fresh DB reliability: `fleetmdm script list` now initializes DB schema. Evidence: `src/fleetmdm/cli.py`, `tests/test_cli.py`.
@@ -34,6 +38,7 @@
 - Seeded/demo workflows are a high-signal smoke test and caught a real evaluation-context gap that unit tests previously missed.
 - Evidence packs are significantly more audit-ready with manifest hashing, optional signatures, and a verify command, but key lifecycle management remains the next trust gap.
 - Deterministic ordering across DB reads materially improves CI snapshot stability and audit diff readability.
+- Machine-readable CLI output should bypass rich rendering (`typer.echo`) to avoid line-wrapping that can corrupt long JSON strings.
 
 ## Notes
 - This file is maintained by the autonomous clone loop.

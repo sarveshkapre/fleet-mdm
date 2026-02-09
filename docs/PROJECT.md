@@ -36,6 +36,6 @@ make release
 ```
 
 ## Next 3 improvements
-1) Add optional policy scoping targets in YAML
-2) Add compliance history and drift tracking
-3) Add optional web dashboard (read-only)
+1) Evidence signing key lifecycle (keygen + keyring-based verification for rotation)
+2) Machine-readable evidence verification reports (`evidence verify --format json`)
+3) Evidence export redaction controls for sensitive inventory facts fields

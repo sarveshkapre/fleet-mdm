@@ -94,9 +94,23 @@ assignments exist, all policies apply to all devices.
 ### Evidence Packs
 - Export SOC-style evidence artifacts: `fleetmdm evidence export --output evidence/`
 - Redaction profiles: `--redact-profile none|minimal|strict`
+- Additional facts redaction: `--redact-config ./redact.yml` (YAML/JSON allowlist/denylist for `facts.*`)
 - Optional manifest signing: `--signing-key-file ./evidence.key`
+- Generate a new signing key: `fleetmdm evidence keygen --keyring-dir ./keys`
 - Verify a bundle: `fleetmdm evidence verify evidence/ --signing-key-file ./evidence.key`
+- Verify with rotated keys: `fleetmdm evidence verify evidence/ --keyring-dir ./keys`
+- Machine-readable verification: `fleetmdm evidence verify evidence/ --format json`
 - Bundle includes: `metadata.json`, `inventory.json`, `policies.json`, `assignments.json`, `latest_run.json`, `drift.json`, `manifest.json` and optional `signature.json`
+
+Example `redact.yml`:
+```yaml
+facts_denylist:
+  - cpu.brand
+  - disk.serial
+facts_allowlist:
+  - disk.encrypted
+  - cpu.cores
+```
 
 ## Docker
 ```bash
