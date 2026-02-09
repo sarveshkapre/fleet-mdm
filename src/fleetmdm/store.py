@@ -237,6 +237,26 @@ def list_policy_assignments_for_tag(conn: sqlite3.Connection, tag: str) -> list[
     return [str(row["policy_id"]) for row in rows]
 
 
+def list_all_policy_assignments(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    return conn.execute(
+        """
+        SELECT policy_id, device_id
+        FROM policy_assignments
+        ORDER BY policy_id, device_id
+        """
+    ).fetchall()
+
+
+def list_all_policy_tag_assignments(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    return conn.execute(
+        """
+        SELECT policy_id, tag
+        FROM policy_tag_assignments
+        ORDER BY policy_id, tag
+        """
+    ).fetchall()
+
+
 
 def get_assigned_policies(conn: sqlite3.Connection, device_id: str) -> list[str]:
     rows = conn.execute(
@@ -246,19 +266,18 @@ def get_assigned_policies(conn: sqlite3.Connection, device_id: str) -> list[str]
 
 
 def get_tag_assigned_policies(conn: sqlite3.Connection, tags: Iterable[str]) -> list[str]:
-    tags_list = [tag for tag in tags if tag]
+    tags_list = sorted({tag for tag in tags if tag})
     if not tags_list:
         return []
-    placeholders = ",".join("?" for _ in tags_list)
-    query = (
-        "SELECT DISTINCT policy_id "
-        "FROM policy_tag_assignments "
-        f"WHERE tag IN ({placeholders}) "
-        "ORDER BY policy_id"
-    )
+
     rows = conn.execute(
-        query,
-        tuple(tags_list),
+        """
+        SELECT DISTINCT policy_id
+        FROM policy_tag_assignments
+        WHERE tag IN (SELECT value FROM json_each(?))
+        ORDER BY policy_id
+        """,
+        (json.dumps(tags_list),),
     ).fetchall()
     return [str(row["policy_id"]) for row in rows]
 
@@ -357,24 +376,51 @@ def list_compliance_history(
     policy_id: str | None,
     limit: int,
 ) -> list[sqlite3.Row]:
-    clauses: list[str] = []
-    params: list[str | int] = []
+    if device_id and policy_id:
+        return conn.execute(
+            """
+            SELECT run_id, device_id, policy_id, policy_name, status, failed_checks, checked_at
+            FROM compliance_results
+            WHERE device_id = ? AND policy_id = ?
+            ORDER BY checked_at DESC
+            LIMIT ?
+            """,
+            (device_id, policy_id, limit),
+        ).fetchall()
+
     if device_id:
-        clauses.append("device_id = ?")
-        params.append(device_id)
+        return conn.execute(
+            """
+            SELECT run_id, device_id, policy_id, policy_name, status, failed_checks, checked_at
+            FROM compliance_results
+            WHERE device_id = ?
+            ORDER BY checked_at DESC
+            LIMIT ?
+            """,
+            (device_id, limit),
+        ).fetchall()
+
     if policy_id:
-        clauses.append("policy_id = ?")
-        params.append(policy_id)
-    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-    query = f"""
+        return conn.execute(
+            """
+            SELECT run_id, device_id, policy_id, policy_name, status, failed_checks, checked_at
+            FROM compliance_results
+            WHERE policy_id = ?
+            ORDER BY checked_at DESC
+            LIMIT ?
+            """,
+            (policy_id, limit),
+        ).fetchall()
+
+    return conn.execute(
+        """
         SELECT run_id, device_id, policy_id, policy_name, status, failed_checks, checked_at
         FROM compliance_results
-        {where}
         ORDER BY checked_at DESC
         LIMIT ?
-    """
-    params.append(limit)
-    return conn.execute(query, tuple(params)).fetchall()
+        """,
+        (limit,),
+    ).fetchall()
 
 
 def list_recent_runs(conn: sqlite3.Connection, limit: int) -> list[sqlite3.Row]:

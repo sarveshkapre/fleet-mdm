@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Mapping, Sequence
+from datetime import datetime, timezone
 from pathlib import Path
+from textwrap import dedent
 from typing import Any
 
 import typer
@@ -38,6 +41,8 @@ from fleetmdm.store import (
     has_any_policy_assignments,
     ingest_devices,
     init_db,
+    list_all_policy_assignments,
+    list_all_policy_tag_assignments,
     list_compliance_history,
     list_devices,
     list_policies,
@@ -64,16 +69,19 @@ OPT_DEVICE_OPTIONAL = typer.Option(None, "--device", help="Device ID")
 OPT_NAME = typer.Option(None, "--name", help="Script name")
 OPT_POLICY_ID_OPTIONAL = typer.Option(None, "--policy", help="Policy ID")
 OPT_LIMIT = typer.Option(50, "--limit", help="Limit rows")
+OPT_EVIDENCE_OUTPUT = typer.Option(None, "--output", help="Directory for evidence bundle")
 
 app = typer.Typer(help="FleetMDM CLI", add_completion=False)
 inventory_app = typer.Typer(help="Inventory tools")
 policy_app = typer.Typer(help="Policy management")
 script_app = typer.Typer(help="Script catalog")
 schema_app = typer.Typer(help="Schema export")
+evidence_app = typer.Typer(help="Evidence export")
 app.add_typer(inventory_app, name="inventory")
 app.add_typer(policy_app, name="policy")
 app.add_typer(script_app, name="script")
 app.add_typer(schema_app, name="schema")
+app.add_typer(evidence_app, name="evidence")
 
 console = Console()
 
@@ -106,12 +114,50 @@ def _extract_device_tags(facts: dict[str, Any]) -> list[str]:
     return tags
 
 
+def _build_evaluation_context(
+    device: Mapping[str, Any], facts: dict[str, Any]
+) -> dict[str, Any]:
+    context = dict(facts)
+    for key in ("device_id", "hostname", "os", "os_version", "serial", "last_seen"):
+        value = device.get(key)
+        if value is not None:
+            context[key] = value
+    return context
+
+
 def _policy_name_map(conn: sqlite3.Connection) -> dict[str, str]:
     return {str(row["policy_id"]): str(row["name"]) for row in list_policies(conn)}
 
 
 def _load_devices_from_json(path: Path) -> list[dict[str, Any]]:
     return load_inventory_json(path)
+
+
+def _compute_drift_changes(
+    latest: Sequence[Any], previous: Sequence[Any]
+) -> list[dict[str, str]]:
+    latest_map = {
+        (str(row["device_id"]), str(row["policy_id"])): str(row["status"]) for row in latest
+    }
+    previous_map = {
+        (str(row["device_id"]), str(row["policy_id"])): str(row["status"]) for row in previous
+    }
+
+    changes: list[dict[str, str]] = []
+    for key, current in latest_map.items():
+        previous_status = previous_map.get(key)
+        if previous_status is None or previous_status == current:
+            continue
+        device_id, policy_id = key
+        changes.append(
+            {
+                "device_id": device_id,
+                "policy_id": policy_id,
+                "previous": previous_status,
+                "current": current,
+            }
+        )
+    return changes
 
 
 @inventory_app.command("validate")
@@ -275,7 +321,9 @@ def policy_assign(
             )
             return
 
-        assert device_id is not None
+        if device_id is None:
+            console.print("Provide exactly one of --device or --tag")
+            raise typer.Exit(code=2)
         if not device_exists(conn, device_id):
             console.print(f"[red]Unknown device: {device_id}[/red]")
             raise typer.Exit(code=1)
@@ -314,7 +362,9 @@ def policy_unassign(
                 console.print(f"No assignment found for {policy_id} on tag '{normalized_tag}'")
             return
 
-        assert device_id is not None
+        if device_id is None:
+            console.print("Provide exactly one of --device or --tag")
+            raise typer.Exit(code=2)
         if not device_exists(conn, device_id):
             console.print(f"[red]Unknown device: {device_id}[/red]")
             raise typer.Exit(code=1)
@@ -358,7 +408,9 @@ def policy_assignments(
             console.print(table)
             return
 
-        assert device_id is not None
+        if device_id is None:
+            console.print("Provide exactly one of --device or --tag")
+            raise typer.Exit(code=2)
         if not device_exists(conn, device_id):
             console.print(f"[red]Unknown device: {device_id}[/red]")
             raise typer.Exit(code=1)
@@ -436,6 +488,8 @@ def check(
             device = get_device(conn, did)
             if device is None:
                 continue
+            device_data = dict(device)
+            evaluation_context = _build_evaluation_context(device_data, facts)
 
             tags = _extract_device_tags(facts)
             policy_ids = (
@@ -458,9 +512,9 @@ def check(
                 if not raw_yaml:
                     continue
                 policy = load_policy(raw_yaml)
-                if not policy_matches_targets(policy, dict(device), facts):
+                if not policy_matches_targets(policy, device_data, facts):
                     continue
-                result = evaluate_policy(policy, facts)
+                result = evaluate_policy(policy, evaluation_context)
                 policy_results.append(result)
                 failed = [c.key for c in result.checks if not c.passed]
                 add_compliance_result(
@@ -535,13 +589,14 @@ def report(
             summary[policy["policy_id"]] = {
                 "policy_id": policy["policy_id"],
                 "policy_name": policy["name"],
-                "pass": 0,
-                "fail": 0,
+                "passed_count": 0,
+                "failed_count": 0,
             }
 
         for device in device_rows:
             facts = get_device_facts(conn, device["device_id"]) or {}
             device_data = dict(device)
+            evaluation_context = _build_evaluation_context(device_data, facts)
             tags = _extract_device_tags(facts)
             applicable = (
                 resolve_assigned_policies_for_device(conn, device["device_id"], tags)
@@ -557,19 +612,21 @@ def report(
                 policy = load_policy(raw_yaml)
                 if not policy_matches_targets(policy, device_data, facts):
                     continue
-                result = evaluate_policy(policy, facts)
+                result = evaluate_policy(policy, evaluation_context)
                 if result.passed:
-                    summary[pid]["pass"] += 1
+                    summary[pid]["passed_count"] += 1
                 else:
-                    summary[pid]["fail"] += 1
+                    summary[pid]["failed_count"] += 1
 
     if format == "json":
         console.print(json.dumps(list(summary.values()), indent=2))
         return
     if format == "csv":
-        rows = ["policy_id,policy_name,pass,fail"]
+        rows = ["policy_id,policy_name,passed,failed"]
         for row in summary.values():
-            rows.append(f"{row['policy_id']},{row['policy_name']},{row['pass']},{row['fail']}")
+            rows.append(
+                f"{row['policy_id']},{row['policy_name']},{row['passed_count']},{row['failed_count']}"
+            )
         console.print("\n".join(rows))
         return
 
@@ -578,7 +635,7 @@ def report(
     table.add_column("Pass")
     table.add_column("Fail")
     for row in summary.values():
-        table.add_row(row["policy_name"], str(row["pass"]), str(row["fail"]))
+        table.add_row(row["policy_name"], str(row["passed_count"]), str(row["failed_count"]))
     console.print(table)
 
 
@@ -646,29 +703,7 @@ def drift(
         previous_run = runs[1]["run_id"]
         latest = list_results_for_run(conn, latest_run)
         previous = list_results_for_run(conn, previous_run)
-
-    latest_map = {
-        (row["device_id"], row["policy_id"]): row["status"] for row in latest
-    }
-    previous_map = {
-        (row["device_id"], row["policy_id"]): row["status"] for row in previous
-    }
-
-    changes = []
-    for key, current in latest_map.items():
-        previous_status = previous_map.get(key)
-        if previous_status is None:
-            continue
-        if previous_status != current:
-            device_id, policy_id = key
-            changes.append(
-                {
-                    "device_id": device_id,
-                    "policy_id": policy_id,
-                    "previous": previous_status,
-                    "current": current,
-                }
-            )
+    changes = _compute_drift_changes(latest, previous)
 
     if format == "json":
         console.print(json.dumps(changes, indent=2))
@@ -695,6 +730,81 @@ def drift(
     console.print(table)
 
 
+@evidence_app.command("export")
+def evidence_export(
+    output: Path | None = OPT_EVIDENCE_OUTPUT,
+    db: str | None = OPT_DB,
+) -> None:
+    """Export a SOC-style evidence bundle as JSON artifacts."""
+    db_path = resolve_db_path(db)
+    init_db(db_path)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    output_dir = output or Path(f"fleetmdm-evidence-{stamp}")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    generated_at = datetime.now(timezone.utc).isoformat()
+    with connect(db_path) as conn:
+        inventory = export_inventory(conn)
+        policies: list[dict[str, Any]] = []
+        for row in list_policies(conn):
+            policy_id = str(row["policy_id"])
+            policies.append(
+                {
+                    "policy_id": policy_id,
+                    "name": str(row["name"]),
+                    "description": row["description"],
+                    "updated_at": str(row["updated_at"]),
+                    "raw_yaml": get_policy_yaml(conn, policy_id),
+                }
+            )
+
+        device_assignments = [
+            {"policy_id": str(row["policy_id"]), "device_id": str(row["device_id"])}
+            for row in list_all_policy_assignments(conn)
+        ]
+        tag_assignments = [
+            {"policy_id": str(row["policy_id"]), "tag": str(row["tag"])}
+            for row in list_all_policy_tag_assignments(conn)
+        ]
+
+        runs = list_recent_runs(conn, 2)
+        latest_run: dict[str, Any] = {}
+        drift_changes: list[dict[str, str]] = []
+        if runs:
+            latest_run_id = str(runs[0]["run_id"])
+            latest_results = [dict(row) for row in list_results_for_run(conn, latest_run_id)]
+            latest_run = {
+                "run_id": latest_run_id,
+                "started_at": str(runs[0]["started_at"]),
+                "results": latest_results,
+            }
+            if len(runs) > 1:
+                previous_run_id = str(runs[1]["run_id"])
+                previous_results = list_results_for_run(conn, previous_run_id)
+                drift_changes = _compute_drift_changes(latest_results, previous_results)
+
+    metadata = {
+        "generated_at": generated_at,
+        "db_path": str(db_path),
+        "schema_version": 1,
+        "artifact_count": 6,
+    }
+    assignments = {"device": device_assignments, "tag": tag_assignments}
+
+    artifacts = {
+        "metadata.json": metadata,
+        "inventory.json": inventory,
+        "policies.json": policies,
+        "assignments.json": assignments,
+        "latest_run.json": latest_run,
+        "drift.json": drift_changes,
+    }
+    for name, payload in artifacts.items():
+        (output_dir / name).write_text(f"{json.dumps(payload, indent=2)}\n", encoding="utf-8")
+
+    console.print(f"Wrote evidence pack to {output_dir}")
+
+
 @script_app.command("add")
 def script_add(
     path: Path = ARG_SCRIPT_FILE,
@@ -718,6 +828,7 @@ def script_list(
 ) -> None:
     """List scripts in the catalog."""
     db_path = resolve_db_path(db)
+    init_db(db_path)
     with connect(db_path) as conn:
         rows = list_scripts(conn)
     table = Table(title="Scripts")
@@ -755,15 +866,17 @@ def seed(
         },
     ]
 
-    policy_yaml = """
-    id: min-os-version
-    name: Minimum OS Version
-    description: Require OS version >= 14.0 for macOS and >= 22.04 for Linux
-    checks:
-      - key: os_version
-        op: version_gte
-        value: "14.0"
-    """.strip()
+    policy_yaml = dedent(
+        """
+        id: min-os-version
+        name: Minimum OS Version
+        description: Require OS version >= 14.0 for macOS and >= 22.04 for Linux
+        checks:
+          - key: os_version
+            op: version_gte
+            value: "14.0"
+        """
+    ).strip()
 
     db_path = resolve_db_path(db)
     init_db(db_path)
