@@ -97,9 +97,12 @@ assignments exist, all policies apply to all devices.
 - Additional facts redaction: `--redact-config ./redact.yml` (YAML/JSON allowlist/denylist for `facts.*`)
 - Optional manifest signing: `--signing-key-file ./evidence.key`
 - Generate a new signing key: `fleetmdm evidence keygen --keyring-dir ./keys`
+- List keyring keys (from `keys/keyring.json`): `fleetmdm evidence key list --keyring-dir ./keys`
+- Revoke a key (metadata only; does not delete key material): `fleetmdm evidence key revoke <key_id> --keyring-dir ./keys`
 - Verify a bundle: `fleetmdm evidence verify evidence/ --signing-key-file ./evidence.key`
 - Verify with rotated keys: `fleetmdm evidence verify evidence/ --keyring-dir ./keys`
 - Machine-readable verification: `fleetmdm evidence verify evidence/ --format json`
+- Write machine-readable verification to a file: `fleetmdm evidence verify evidence/ --keyring-dir ./keys --format json --output verify.json`
 - Bundle includes: `metadata.json`, `inventory.json`, `policies.json`, `assignments.json`, `latest_run.json`, `drift.json`, `manifest.json` and optional `signature.json`
 
 Example `redact.yml`:

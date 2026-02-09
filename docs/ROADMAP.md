@@ -1,9 +1,9 @@
 # Roadmap
 
 ## Near term
-- Add device tags and tag-based policy assignment
-- Add compliance history and drift tracking
-- Expand SOC evidence packs with key rotation support and policy-level redaction controls
+- Extend evidence redaction controls beyond inventory facts (for example, policy YAML `raw_yaml` redaction).
+- Inventory ingest dedupe/upsert by `device_id` for correctness at scale.
+- Add compliance pipeline integration outputs (for example, `report --format junit`).
 
 ## Later
 - Optional read-only web dashboard

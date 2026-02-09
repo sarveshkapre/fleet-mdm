@@ -36,6 +36,6 @@ make release
 ```
 
 ## Next 3 improvements
-1) Evidence signing key lifecycle (keygen + keyring-based verification for rotation)
-2) Machine-readable evidence verification reports (`evidence verify --format json`)
-3) Evidence export redaction controls for sensitive inventory facts fields
+1) Extend evidence redaction controls beyond inventory facts (for example, policy YAML `raw_yaml` redaction).
+2) Inventory ingest dedupe/upsert by `device_id` for correctness and scale.
+3) Compliance pipeline integration output (for example, `report --format junit`).

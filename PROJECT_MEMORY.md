@@ -62,3 +62,41 @@
   `verified-local`.
 - Follow-ups:
   Add key rotation/key lifecycle strategy and machine-readable verify reports for external audit pipelines.
+
+## 2026-02-09 - Cycle 2 - Evidence Key Lifecycle Metadata + Verify Output Artifacts
+- Recent Decisions:
+  Add a keyring manifest (`keyring.json`) with basic key lifecycle metadata (created/activated/revoked), add `fleetmdm evidence key list/revoke`, and extend `fleetmdm evidence verify` with `--output` for pipeline-friendly JSON artifacts plus lifecycle validation (using `signature.json` `signed_at`).
+- Why:
+  Evidence bundles were verifiable cryptographically, but audit workflows still needed operational key tracking (revocation state) and file-based outputs that CI/audit systems can ingest and store as artifacts.
+- Evidence:
+  `src/fleetmdm/cli.py`, `tests/test_cli.py`, `README.md`, `docs/CHANGELOG.md`, `docs/ROADMAP.md`, `docs/PROJECT.md`.
+- Verification Evidence:
+  `make check` (pass), `make security` (pass).
+  Smoke (pass):
+  ```bash
+  tmpdir=$(mktemp -d)
+  cd "$tmpdir"
+  python3 -m venv .venv
+  . .venv/bin/activate
+  python -m pip -q install -e /Users/sarvesh/code/fleet-mdm
+  fleetmdm init --db fleet.db
+  fleetmdm seed --db fleet.db
+  fleetmdm check --device mac-001 --db fleet.db --format json >/dev/null
+  fleetmdm evidence keygen --keyring-dir keys >/dev/null
+  fleetmdm evidence key list --keyring-dir keys --format json >/dev/null
+  keyfile=$(python -c 'import json; import pathlib; d=json.loads(pathlib.Path("keys/keyring.json").read_text()); print("keys/"+d["keys"][0]["filename"])')
+  fleetmdm evidence export --db fleet.db --output evidence --signing-key-file "$keyfile" --redact-profile strict >/dev/null
+  fleetmdm evidence verify evidence --keyring-dir keys --format json --output verify.json
+  python -c 'import json; d=json.load(open("verify.json")); assert d["ok"] is True and d["signature"]["verified"] is True'
+  ```
+- Mistakes And Fixes:
+  - Root cause: introduced mixed tabs/spaces during a large edit to `src/fleetmdm/cli.py`, breaking syntax and linting.
+  - Prevention: keep edits localized and always run `make check` before committing/pushing.
+- Commit:
+  `57612e1`.
+- Confidence:
+  High.
+- Trust Label:
+  `verified-local`.
+- Market scan (bounded, untrusted):
+  - NIST OSCAL: standardized compliance/evidence models that many audit pipelines expect to integrate with. https://pages.nist.gov/OSCAL/

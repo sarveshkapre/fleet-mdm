@@ -2,11 +2,14 @@
 
 ## Unreleased (2026-02-09)
 - Add `fleetmdm evidence keygen` to generate signing keys with stable key IDs.
+- Add `keys/keyring.json` keyring manifests with key lifecycle metadata (created/activated/revoked) plus `fleetmdm evidence key list` and `fleetmdm evidence key revoke`.
 - Add `--keyring-dir` to `fleetmdm evidence verify` to support signing key rotation via key-ID selection.
 - Add `fleetmdm evidence verify --format json` to emit a machine-readable verification report.
+- Add `fleetmdm evidence verify --output <file>` for CI/audit pipelines that want an artifact instead of stdout.
 - Add `--redact-config` to `fleetmdm evidence export` for allowlist/denylist redaction of inventory `facts.*` fields.
 - Add deterministic evidence `manifest.json` generation with per-artifact SHA256 and bundle fingerprinting.
 - Add `fleetmdm evidence verify` to validate evidence integrity and optional HMAC signatures.
+- Include `signed_at` timestamps in `signature.json` for key lifecycle validation.
 - Add evidence export redaction profiles (`none`, `minimal`, `strict`) for device identifiers and serials.
 - Add optional `--signing-key-file` support for HMAC-signed evidence manifests (`signature.json`).
 - Improve deterministic ordering across policy/device/script/result DB read paths for stable exports and snapshots.

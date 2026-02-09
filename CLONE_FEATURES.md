@@ -7,12 +7,18 @@
 - Gaps found during codebase exploration
 
 ## Candidate Features To Do
-- [ ] P1 - Add key lifecycle metadata for evidence signing (key activation dates, revocation, and keyring manifests).
-- [ ] P2 - Add `fleetmdm evidence verify --output <file>` for CI/audit pipelines that want an artifact instead of stdout.
-- [ ] P2 - Extend evidence redaction controls beyond inventory facts (for example, policy YAML `raw_yaml` redaction / stripping comments).
+- [ ] P2 - Extend evidence redaction controls beyond inventory facts (for example, policy YAML `raw_yaml` redaction or stripping comments).
+- [ ] P2 - Inventory ingest dedupe/upsert by `device_id` (with sane `last_seen` semantics) to avoid duplicate rows and improve drift/report correctness.
+- [ ] P2 - Add `history`/`drift` filters: `--since` (timestamp) and `--policy` for drift to reduce noise at scale.
+- [ ] P2 - Add `report --format junit` (or `sarif`) as a compliance pipeline integration primitive.
+- [ ] P3 - SQLite performance hardening: add indexes for history/results query paths and a `fleetmdm doctor` command to surface DB stats and common misconfigurations.
+- [ ] P3 - More “agent-side exporter” examples (macOS: FileVault, OS update settings; Linux: disk encryption, kernel version) plus schema validation guidance.
 - [ ] P3 - Optional read-only web dashboard for inventory + compliance + evidence verification status.
 
 ## Implemented
+- [x] 2026-02-09 - Evidence signing key lifecycle metadata: keyring manifest (`keyring.json`), `fleetmdm evidence key list`, and `fleetmdm evidence key revoke` plus verify lifecycle checks (`signed_at`, activation/revocation windows). Evidence: `src/fleetmdm/cli.py`, `tests/test_cli.py`, smoke run.
+- [x] 2026-02-09 - Added `fleetmdm evidence verify --output <file>` (JSON) for CI/audit pipelines. Evidence: `src/fleetmdm/cli.py`, `tests/test_cli.py`, `README.md`.
+- [x] 2026-02-09 - Docs alignment: refreshed next improvements and roadmap to reflect shipped work. Evidence: `docs/PROJECT.md`, `docs/ROADMAP.md`, `docs/CHANGELOG.md`, `README.md`.
 - [x] 2026-02-09 - Fixed CI secret scanning by replacing `gitleaks-action@v2` (license-gated) with pinned gitleaks CLI install + checksum verification. Evidence: `.github/workflows/ci.yml`.
 - [x] 2026-02-09 - Tracked repo-wide `AGENTS.md` contract and refreshed session task tracker. Evidence: `AGENTS.md`, `CLONE_FEATURES.md`.
 - [x] 2026-02-09 - Evidence signing key rotation workflow: add `fleetmdm evidence keygen` and `evidence verify --keyring-dir` (key-ID selection). Evidence: `src/fleetmdm/cli.py`, `tests/test_cli.py`, `README.md`.
