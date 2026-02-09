@@ -7,12 +7,14 @@
 - Gaps found during codebase exploration
 
 ## Candidate Features To Do
-- [ ] P2 - Extend evidence redaction controls beyond inventory facts (for example, policy YAML `raw_yaml` redaction or stripping comments).
-- [ ] P2 - Inventory ingest dedupe/upsert by `device_id` (with sane `last_seen` semantics) to avoid duplicate rows and improve drift/report correctness.
+- [ ] P1 (Selected) - Inventory ingest correctness: normalize `last_seen` to ISO-8601 UTC, dedupe per payload by `device_id`, and prevent stale ingests from overwriting newer device state.
+- [ ] P1 (Selected) - Add `fleetmdm report --format junit` as a compliance pipeline integration primitive (JUnit XML stdout).
+- [ ] P1 (Selected) - Extend evidence redaction beyond inventory facts: redact `policies.json` `raw_yaml` in `--redact-profile strict` and strip comment-only lines in `minimal`.
+- [ ] P2 - CLI reliability: ensure read-only commands (for example `fleetmdm policy list`) initialize schema (`init_db`) before querying on fresh DB paths.
 - [ ] P2 - Add `history`/`drift` filters: `--since` (timestamp) and `--policy` for drift to reduce noise at scale.
-- [ ] P2 - Add `report --format junit` (or `sarif`) as a compliance pipeline integration primitive.
+- [ ] P2 - Add `report --format sarif` as an alternative compliance pipeline output.
 - [ ] P3 - SQLite performance hardening: add indexes for history/results query paths and a `fleetmdm doctor` command to surface DB stats and common misconfigurations.
-- [ ] P3 - More “agent-side exporter” examples (macOS: FileVault, OS update settings; Linux: disk encryption, kernel version) plus schema validation guidance.
+- [ ] P3 - More agent-side exporter examples (macOS: FileVault, OS update settings; Linux: disk encryption, kernel version) plus schema validation guidance.
 - [ ] P3 - Optional read-only web dashboard for inventory + compliance + evidence verification status.
 
 ## Implemented
