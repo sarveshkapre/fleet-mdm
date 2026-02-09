@@ -93,7 +93,10 @@ assignments exist, all policies apply to all devices.
 
 ### Evidence Packs
 - Export SOC-style evidence artifacts: `fleetmdm evidence export --output evidence/`
-- Bundle includes: `metadata.json`, `inventory.json`, `policies.json`, `assignments.json`, `latest_run.json`, `drift.json`
+- Redaction profiles: `--redact-profile none|minimal|strict`
+- Optional manifest signing: `--signing-key-file ./evidence.key`
+- Verify a bundle: `fleetmdm evidence verify evidence/ --signing-key-file ./evidence.key`
+- Bundle includes: `metadata.json`, `inventory.json`, `policies.json`, `assignments.json`, `latest_run.json`, `drift.json`, `manifest.json` and optional `signature.json`
 
 ## Docker
 ```bash

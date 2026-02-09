@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import sqlite3
 from collections.abc import Mapping, Sequence
@@ -70,6 +72,28 @@ OPT_NAME = typer.Option(None, "--name", help="Script name")
 OPT_POLICY_ID_OPTIONAL = typer.Option(None, "--policy", help="Policy ID")
 OPT_LIMIT = typer.Option(50, "--limit", help="Limit rows")
 OPT_EVIDENCE_OUTPUT = typer.Option(None, "--output", help="Directory for evidence bundle")
+OPT_REDACT_PROFILE = typer.Option(
+    "none",
+    "--redact-profile",
+    help="Evidence redaction profile: none|minimal|strict",
+)
+OPT_SIGNING_KEY_FILE = typer.Option(
+    None,
+    "--signing-key-file",
+    exists=True,
+    readable=True,
+    help="Path to key file used to HMAC-sign evidence manifests",
+)
+ARG_EVIDENCE_DIR = typer.Argument(
+    ...,
+    exists=True,
+    file_okay=False,
+    dir_okay=True,
+    readable=True,
+    help="Evidence bundle directory",
+)
+
+ALLOWED_REDACTION_PROFILES = {"none", "minimal", "strict"}
 
 app = typer.Typer(help="FleetMDM CLI", add_completion=False)
 inventory_app = typer.Typer(help="Inventory tools")
@@ -158,6 +182,125 @@ def _compute_drift_changes(
             }
         )
     return changes
+
+
+def _json_payload_text(payload: Any) -> str:
+    return f"{json.dumps(payload, indent=2, sort_keys=True)}\n"
+
+
+def _write_json_artifact(path: Path, payload: Any) -> None:
+    path.write_text(_json_payload_text(payload), encoding="utf-8")
+
+
+def _hash_bytes(payload: bytes) -> str:
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _normalize_redaction_profile(profile: str) -> str:
+    normalized = profile.strip().lower()
+    if normalized not in ALLOWED_REDACTION_PROFILES:
+        raise ValueError(
+            f"Invalid redaction profile: {profile}. "
+            "Expected one of none|minimal|strict."
+        )
+    return normalized
+
+
+def _redact_serial(serial: str, profile: str) -> str:
+    if profile == "none":
+        return serial
+    if profile == "minimal":
+        suffix = serial[-4:] if len(serial) > 4 else serial
+        return f"***{suffix}"
+    return f"serial-{sha256_text(serial)[:12]}"
+
+
+def _redact_device_id(device_id: str, profile: str) -> str:
+    if profile != "strict":
+        return device_id
+    return f"device-{sha256_text(device_id)[:12]}"
+
+
+def _apply_redaction_profile(
+    profile: str,
+    inventory: Sequence[dict[str, Any]],
+    device_assignments: Sequence[dict[str, str]],
+    latest_run: dict[str, Any],
+    drift_changes: Sequence[dict[str, str]],
+) -> tuple[list[dict[str, Any]], list[dict[str, str]], dict[str, Any], list[dict[str, str]]]:
+    device_map: dict[str, str] = {}
+
+    def redact_device_id(value: str) -> str:
+        if value not in device_map:
+            device_map[value] = _redact_device_id(value, profile)
+        return device_map[value]
+
+    redacted_inventory: list[dict[str, Any]] = []
+    for record in inventory:
+        row = dict(record)
+        device_id = str(row["device_id"])
+        row["device_id"] = redact_device_id(device_id)
+        row["serial"] = _redact_serial(str(row["serial"]), profile)
+        redacted_inventory.append(row)
+
+    redacted_assignments: list[dict[str, str]] = []
+    for assignment in device_assignments:
+        row = dict(assignment)
+        row["device_id"] = redact_device_id(str(row["device_id"]))
+        redacted_assignments.append(row)
+
+    redacted_latest_run = dict(latest_run)
+    if redacted_latest_run:
+        results = []
+        for result in redacted_latest_run.get("results", []):
+            row = dict(result)
+            row["device_id"] = redact_device_id(str(row["device_id"]))
+            results.append(row)
+        redacted_latest_run["results"] = results
+
+    redacted_drift: list[dict[str, str]] = []
+    for change in drift_changes:
+        row = dict(change)
+        row["device_id"] = redact_device_id(str(row["device_id"]))
+        redacted_drift.append(row)
+
+    return redacted_inventory, redacted_assignments, redacted_latest_run, redacted_drift
+
+
+def _build_manifest(
+    output_dir: Path, artifact_names: Sequence[str], generated_at: str, redaction_profile: str
+) -> dict[str, Any]:
+    entries: list[dict[str, Any]] = []
+    for name in sorted(artifact_names):
+        content = (output_dir / name).read_bytes()
+        entries.append(
+            {
+                "name": name,
+                "sha256": _hash_bytes(content),
+                "size_bytes": len(content),
+            }
+        )
+    bundle_material = "\n".join(f"{entry['name']}:{entry['sha256']}" for entry in entries)
+    return {
+        "schema_version": 1,
+        "generated_at": generated_at,
+        "redaction_profile": redaction_profile,
+        "artifact_count": len(entries),
+        "bundle_sha256": sha256_text(bundle_material),
+        "artifacts": entries,
+    }
+
+
+def _sign_manifest(manifest_bytes: bytes, key_bytes: bytes, generated_at: str) -> dict[str, Any]:
+    signature = hmac.new(key_bytes, manifest_bytes, hashlib.sha256).hexdigest()
+    return {
+        "schema_version": 1,
+        "generated_at": generated_at,
+        "algorithm": "hmac-sha256",
+        "key_id": _hash_bytes(key_bytes)[:16],
+        "manifest_sha256": _hash_bytes(manifest_bytes),
+        "signature": signature,
+    }
 
 
 @inventory_app.command("validate")
@@ -733,9 +876,17 @@ def drift(
 @evidence_app.command("export")
 def evidence_export(
     output: Path | None = OPT_EVIDENCE_OUTPUT,
+    redaction_profile: str = OPT_REDACT_PROFILE,
+    signing_key_file: Path | None = OPT_SIGNING_KEY_FILE,
     db: str | None = OPT_DB,
 ) -> None:
     """Export a SOC-style evidence bundle as JSON artifacts."""
+    try:
+        profile = _normalize_redaction_profile(redaction_profile)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=2) from exc
+
     db_path = resolve_db_path(db)
     init_db(db_path)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -783,26 +934,142 @@ def evidence_export(
                 previous_results = list_results_for_run(conn, previous_run_id)
                 drift_changes = _compute_drift_changes(latest_results, previous_results)
 
+    (
+        redacted_inventory,
+        redacted_device_assignments,
+        redacted_latest_run,
+        redacted_drift_changes,
+    ) = _apply_redaction_profile(
+        profile,
+        inventory,
+        device_assignments,
+        latest_run,
+        drift_changes,
+    )
+
+    total_artifacts = 7 + (1 if signing_key_file else 0)
     metadata = {
         "generated_at": generated_at,
         "db_path": str(db_path),
+        "redaction_profile": profile,
         "schema_version": 1,
-        "artifact_count": 6,
+        "artifact_count": total_artifacts,
     }
-    assignments = {"device": device_assignments, "tag": tag_assignments}
+    assignments = {"device": redacted_device_assignments, "tag": tag_assignments}
 
     artifacts = {
         "metadata.json": metadata,
-        "inventory.json": inventory,
+        "inventory.json": redacted_inventory,
         "policies.json": policies,
         "assignments.json": assignments,
-        "latest_run.json": latest_run,
-        "drift.json": drift_changes,
+        "latest_run.json": redacted_latest_run,
+        "drift.json": redacted_drift_changes,
     }
     for name, payload in artifacts.items():
-        (output_dir / name).write_text(f"{json.dumps(payload, indent=2)}\n", encoding="utf-8")
+        _write_json_artifact(output_dir / name, payload)
 
-    console.print(f"Wrote evidence pack to {output_dir}")
+    manifest = _build_manifest(output_dir, list(artifacts.keys()), generated_at, profile)
+    _write_json_artifact(output_dir / "manifest.json", manifest)
+
+    if signing_key_file:
+        manifest_bytes = (output_dir / "manifest.json").read_bytes()
+        key_bytes = signing_key_file.read_bytes()
+        signature = _sign_manifest(manifest_bytes, key_bytes, generated_at)
+        _write_json_artifact(output_dir / "signature.json", signature)
+
+    message = f"Wrote evidence pack to {output_dir} (redaction={profile})"
+    if signing_key_file:
+        message += ", signed"
+    console.print(message)
+
+
+@evidence_app.command("verify")
+def evidence_verify(
+    bundle_dir: Path = ARG_EVIDENCE_DIR,
+    signing_key_file: Path | None = OPT_SIGNING_KEY_FILE,
+) -> None:
+    """Verify evidence bundle integrity and optional signature."""
+    manifest_path = bundle_dir / "manifest.json"
+    if not manifest_path.exists():
+        console.print("[red]manifest.json not found in evidence directory[/red]")
+        raise typer.Exit(code=1)
+
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except ValueError as exc:
+        console.print(f"[red]Invalid manifest.json: {exc}[/red]")
+        raise typer.Exit(code=1) from exc
+
+    entries = manifest.get("artifacts")
+    if not isinstance(entries, list):
+        console.print("[red]manifest.json is missing a valid artifacts list[/red]")
+        raise typer.Exit(code=1)
+
+    errors: list[str] = []
+    normalized_entries: list[dict[str, str]] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            errors.append("Invalid manifest entry format")
+            continue
+        name = str(entry.get("name", ""))
+        expected_sha = str(entry.get("sha256", ""))
+        expected_size = entry.get("size_bytes")
+        if not name or not expected_sha:
+            errors.append("Manifest entry missing name or sha256")
+            continue
+        normalized_entries.append({"name": name, "sha256": expected_sha})
+
+        artifact_path = bundle_dir / name
+        if not artifact_path.exists():
+            errors.append(f"Missing artifact: {name}")
+            continue
+        actual_bytes = artifact_path.read_bytes()
+        actual_sha = _hash_bytes(actual_bytes)
+        if actual_sha != expected_sha:
+            errors.append(f"Checksum mismatch: {name}")
+        if isinstance(expected_size, int) and expected_size != len(actual_bytes):
+            errors.append(f"Size mismatch: {name}")
+
+    sorted_entries = sorted(normalized_entries, key=lambda item: item["name"])
+    bundle_material = "\n".join(f"{entry['name']}:{entry['sha256']}" for entry in sorted_entries)
+    expected_bundle_hash = manifest.get("bundle_sha256")
+    if isinstance(expected_bundle_hash, str) and expected_bundle_hash:
+        actual_bundle_hash = sha256_text(bundle_material)
+        if not hmac.compare_digest(actual_bundle_hash, expected_bundle_hash):
+            errors.append("Bundle fingerprint mismatch")
+
+    signature_path = bundle_dir / "signature.json"
+    if signing_key_file:
+        if not signature_path.exists():
+            errors.append("signature.json not found, but --signing-key-file was provided")
+        else:
+            try:
+                signature_payload = json.loads(signature_path.read_text(encoding="utf-8"))
+            except ValueError as exc:
+                errors.append(f"Invalid signature.json: {exc}")
+            else:
+                if signature_payload.get("algorithm") != "hmac-sha256":
+                    errors.append("Unsupported signature algorithm")
+                signature = str(signature_payload.get("signature", ""))
+                expected = hmac.new(
+                    signing_key_file.read_bytes(),
+                    manifest_path.read_bytes(),
+                    hashlib.sha256,
+                ).hexdigest()
+                if not hmac.compare_digest(signature, expected):
+                    errors.append("Manifest signature mismatch")
+    elif signature_path.exists():
+        console.print("signature.json found; skipping signature verification (no key provided)")
+
+    if errors:
+        for error in errors:
+            console.print(f"[red]{error}[/red]")
+        raise typer.Exit(code=1)
+
+    if signing_key_file:
+        console.print("Evidence bundle integrity and signature verification passed")
+        return
+    console.print("Evidence bundle integrity verification passed")
 
 
 @script_app.command("add")

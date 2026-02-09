@@ -164,7 +164,13 @@ def add_policy(
 
 
 def list_policies(conn: sqlite3.Connection) -> list[sqlite3.Row]:
-    return conn.execute("SELECT policy_id, name, description, updated_at FROM policies").fetchall()
+    return conn.execute(
+        """
+        SELECT policy_id, name, description, updated_at
+        FROM policies
+        ORDER BY policy_id
+        """
+    ).fetchall()
 
 
 def get_policy_yaml(conn: sqlite3.Connection, policy_id: str) -> str | None:
@@ -260,7 +266,13 @@ def list_all_policy_tag_assignments(conn: sqlite3.Connection) -> list[sqlite3.Ro
 
 def get_assigned_policies(conn: sqlite3.Connection, device_id: str) -> list[str]:
     rows = conn.execute(
-        "SELECT policy_id FROM policy_assignments WHERE device_id = ?", (device_id,)
+        """
+        SELECT policy_id
+        FROM policy_assignments
+        WHERE device_id = ?
+        ORDER BY policy_id
+        """,
+        (device_id,),
     ).fetchall()
     return [str(row["policy_id"]) for row in rows]
 
@@ -300,7 +312,11 @@ def resolve_assigned_policies_for_device(
 
 def list_devices(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return conn.execute(
-        "SELECT device_id, hostname, os, os_version, serial, last_seen FROM devices"
+        """
+        SELECT device_id, hostname, os, os_version, serial, last_seen
+        FROM devices
+        ORDER BY device_id
+        """
     ).fetchall()
 
 
@@ -339,7 +355,13 @@ def add_script(
 
 
 def list_scripts(conn: sqlite3.Connection) -> list[sqlite3.Row]:
-    return conn.execute("SELECT script_id, name, sha256, updated_at FROM scripts").fetchall()
+    return conn.execute(
+        """
+        SELECT script_id, name, sha256, updated_at
+        FROM scripts
+        ORDER BY script_id
+        """
+    ).fetchall()
 
 
 def create_compliance_run(conn: sqlite3.Connection) -> str:
@@ -382,7 +404,7 @@ def list_compliance_history(
             SELECT run_id, device_id, policy_id, policy_name, status, failed_checks, checked_at
             FROM compliance_results
             WHERE device_id = ? AND policy_id = ?
-            ORDER BY checked_at DESC
+            ORDER BY checked_at DESC, run_id DESC, device_id, policy_id
             LIMIT ?
             """,
             (device_id, policy_id, limit),
@@ -394,7 +416,7 @@ def list_compliance_history(
             SELECT run_id, device_id, policy_id, policy_name, status, failed_checks, checked_at
             FROM compliance_results
             WHERE device_id = ?
-            ORDER BY checked_at DESC
+            ORDER BY checked_at DESC, run_id DESC, device_id, policy_id
             LIMIT ?
             """,
             (device_id, limit),
@@ -406,7 +428,7 @@ def list_compliance_history(
             SELECT run_id, device_id, policy_id, policy_name, status, failed_checks, checked_at
             FROM compliance_results
             WHERE policy_id = ?
-            ORDER BY checked_at DESC
+            ORDER BY checked_at DESC, run_id DESC, device_id, policy_id
             LIMIT ?
             """,
             (policy_id, limit),
@@ -416,7 +438,7 @@ def list_compliance_history(
         """
         SELECT run_id, device_id, policy_id, policy_name, status, failed_checks, checked_at
         FROM compliance_results
-        ORDER BY checked_at DESC
+        ORDER BY checked_at DESC, run_id DESC, device_id, policy_id
         LIMIT ?
         """,
         (limit,),
@@ -436,6 +458,7 @@ def list_results_for_run(conn: sqlite3.Connection, run_id: str) -> list[sqlite3.
         SELECT device_id, policy_id, policy_name, status, failed_checks, checked_at
         FROM compliance_results
         WHERE run_id = ?
+        ORDER BY device_id, policy_id
         """,
         (run_id,),
     ).fetchall()
