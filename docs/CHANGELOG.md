@@ -7,8 +7,10 @@
 - Add `fleetmdm evidence verify --format json` to emit a machine-readable verification report.
 - Add `fleetmdm evidence verify --output <file>` for CI/audit pipelines that want an artifact instead of stdout.
 - Add `fleetmdm report --format junit` for JUnit XML compliance pipeline ingestion.
+- Add `fleetmdm report --format sarif` for code-scanning/compliance pipeline ingestion.
 - Extend evidence redaction to policies: redact `policies.json` `raw_yaml` in `--redact-profile strict` and strip comment-only lines in `minimal`.
 - Normalize inventory `last_seen` timestamps and prevent stale ingests from overwriting newer device state.
+- Add `--since` to `fleetmdm history` and `fleetmdm drift` plus `--policy` filter for `fleetmdm drift`.
 - Add `--redact-config` to `fleetmdm evidence export` for allowlist/denylist redaction of inventory `facts.*` fields.
 - Add deterministic evidence `manifest.json` generation with per-artifact SHA256 and bundle fingerprinting.
 - Add `fleetmdm evidence verify` to validate evidence integrity and optional HMAC signatures.

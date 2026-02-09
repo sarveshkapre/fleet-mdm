@@ -525,6 +525,44 @@ def test_report_junit_format_emits_failures(tmp_path: Path) -> None:
     assert failing[0].find("failure") is not None
 
 
+def test_report_sarif_format_emits_results(tmp_path: Path) -> None:
+    db_path = tmp_path / "fleet.db"
+    policy_path = tmp_path / "policy.yaml"
+
+    policy_path.write_text(
+        "\n".join(
+            [
+                "id: disk-encryption",
+                "name: Disk Encryption Enabled",
+                "checks:",
+                "  - key: disk.encrypted",
+                "    op: eq",
+                "    value: true",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    assert runner.invoke(app, ["seed", "--db", str(db_path)]).exit_code == 0
+    assert (
+        runner.invoke(app, ["policy", "add", str(policy_path), "--db", str(db_path)]).exit_code
+        == 0
+    )
+
+    result = runner.invoke(app, ["report", "--db", str(db_path), "--format", "sarif"])
+    assert result.exit_code == 0
+
+    sarif = json.loads(result.stdout)
+    assert sarif["version"] == "2.1.0"
+    assert "runs" in sarif and sarif["runs"]
+    run = sarif["runs"][0]
+    assert run["tool"]["driver"]["name"] == "FleetMDM"
+    results = run["results"]
+    assert len(results) == 1
+    assert results[0]["ruleId"] == "disk-encryption"
+
+
 def test_history_since_filters_rows(tmp_path: Path) -> None:
     db_path = tmp_path / "fleet.db"
     init_db(db_path)

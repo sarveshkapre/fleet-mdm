@@ -30,7 +30,13 @@ from fleetmdm.policy import (
     policy_matches_targets,
     validate_policy_file,
 )
-from fleetmdm.report import render_csv, render_json, render_junit_summary, render_table
+from fleetmdm.report import (
+    render_csv,
+    render_json,
+    render_junit_summary,
+    render_sarif_summary,
+    render_table,
+)
 from fleetmdm.store import (
     add_compliance_result,
     add_policy,
@@ -923,7 +929,7 @@ def check(
 
 @app.command()
 def report(
-    format: str = typer.Option("table", "--format", help="table/json/csv/junit"),
+    format: str = typer.Option("table", "--format", help="table/json/csv/junit/sarif"),
     db: str | None = OPT_DB,
 ) -> None:
     """Summary compliance report across devices."""
@@ -984,6 +990,9 @@ def report(
         return
     if format == "junit":
         typer.echo(render_junit_summary(list(summary.values())), nl=False)
+        return
+    if format == "sarif":
+        typer.echo(render_sarif_summary(list(summary.values())), nl=False)
         return
 
     table = Table(title="Compliance Summary")

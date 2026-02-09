@@ -70,6 +70,7 @@ fleetmdm policy add examples/policy.yaml
 fleetmdm policy assign disk-encryption --device mac-001
 fleetmdm check --device mac-001
 fleetmdm report --format json
+fleetmdm report --format sarif > report.sarif
 fleetmdm report --format junit > report.xml
 ```
 

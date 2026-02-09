@@ -6,13 +6,15 @@ from collections.abc import Iterable
 from datetime import datetime, timezone
 from io import StringIO
 from typing import Any
-from xml.etree import ElementTree as ET  # nosec B405 - used only to generate XML, not parse it
+from xml.etree import ElementTree as ET  # nosec B405
 
 from rich.console import Console
 from rich.table import Table
 
 from fleetmdm.policy import PolicyResult
 
+# Bandit flags ElementTree for XML parsing risks; we only generate XML here and never parse
+# untrusted XML.
 
 def render_table(results: Iterable[PolicyResult]) -> str:
     table = Table(title="FleetMDM Compliance")
@@ -126,3 +128,71 @@ def render_junit_summary(summary: Iterable[dict[str, Any]]) -> str:
 
     xml_bytes = ET.tostring(suite, encoding="utf-8", xml_declaration=True)
     return f"{xml_bytes.decode('utf-8')}\n"
+
+
+def render_sarif_summary(summary: Iterable[dict[str, Any]]) -> str:
+    """
+    Render a minimal SARIF v2.1.0 report for CI/code-scanning style ingestion.
+
+    Each failing policy becomes a SARIF "result" (one per policy), with counts surfaced in
+    properties.
+    """
+    rows = list(summary)
+    rules: list[dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
+
+    for row in rows:
+        policy_id = str(row.get("policy_id", ""))
+        policy_name = str(row.get("policy_name", ""))
+        passed = int(row.get("passed_count", 0) or 0)
+        failed = int(row.get("failed_count", 0) or 0)
+
+        if not policy_id and not policy_name:
+            continue
+
+        rules.append(
+            {
+                "id": policy_id or policy_name,
+                "name": policy_name or policy_id or "policy",
+                "shortDescription": {"text": policy_name or policy_id or "Policy"},
+            }
+        )
+
+        if failed <= 0:
+            continue
+
+        results.append(
+            {
+                "ruleId": policy_id or policy_name or "policy",
+                "level": "error",
+                "message": {
+                    "text": f"{policy_name or policy_id} failed on {failed} device(s)."
+                },
+                "locations": [
+                    {
+                        "physicalLocation": {
+                            "artifactLocation": {"uri": "fleetmdm://compliance"}
+                        }
+                    }
+                ],
+                "properties": {"failed_devices": failed, "passed_devices": passed},
+            }
+        )
+
+    sarif: dict[str, Any] = {
+        "version": "2.1.0",
+        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+        "runs": [
+            {
+                "tool": {"driver": {"name": "FleetMDM", "rules": rules}},
+                "invocations": [
+                    {
+                        "executionSuccessful": True,
+                        "endTimeUtc": datetime.now(timezone.utc).isoformat(),
+                    }
+                ],
+                "results": results,
+            }
+        ],
+    }
+    return f"{json.dumps(sarif, indent=2)}\n"

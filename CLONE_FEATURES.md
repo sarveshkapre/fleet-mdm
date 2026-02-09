@@ -7,12 +7,12 @@
 - Gaps found during codebase exploration
 
 ## Candidate Features To Do
-- [ ] P2 - Add `report --format sarif` as an alternative compliance pipeline output.
 - [ ] P3 - SQLite performance hardening: add indexes for history/results query paths and a `fleetmdm doctor` command to surface DB stats and common misconfigurations.
 - [ ] P3 - More agent-side exporter examples (macOS: FileVault, OS update settings; Linux: disk encryption, kernel version) plus schema validation guidance.
 - [ ] P3 - Optional read-only web dashboard for inventory + compliance + evidence verification status.
 
 ## Implemented
+- [x] 2026-02-09 - Added `fleetmdm report --format sarif` for code-scanning/compliance pipeline integration. Evidence: `src/fleetmdm/report.py`, `src/fleetmdm/cli.py`, `tests/test_cli.py`, `README.md`.
 - [x] 2026-02-09 - Added `history` and `drift` filters (`--since` and `drift --policy`) for scale and noise reduction. Evidence: `src/fleetmdm/cli.py`, `src/fleetmdm/store.py`, `tests/test_store.py`, `tests/test_cli.py`, `README.md`.
 - [x] 2026-02-09 - Inventory ingest correctness: normalize `last_seen`, dedupe per payload by `device_id`, and prevent stale ingests from overwriting newer device state. Evidence: `src/fleetmdm/store.py`, `src/fleetmdm/inventory.py`, `src/fleetmdm/cli.py`, `tests/test_store.py`, `tests/test_inventory.py`.
 - [x] 2026-02-09 - Added `fleetmdm report --format junit` (JUnit XML stdout) for pipeline ingestion. Evidence: `src/fleetmdm/report.py`, `src/fleetmdm/cli.py`, `tests/test_cli.py`, `README.md`.
