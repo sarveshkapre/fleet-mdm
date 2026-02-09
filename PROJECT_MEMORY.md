@@ -1,5 +1,55 @@
 # Project Memory
 
+## 2026-02-09 - Cycle 4 - Scaling UX + SARIF + Doctor
+- Recent Decisions:
+  Add scaling filters (`history --since`, `drift --since`, `drift --policy`), add `report --format sarif`,
+  and ship `fleetmdm doctor` plus additional SQLite indexes for history/results query paths.
+- Why:
+  These are the highest leverage production-readiness gaps for a local-first compliance tool: reduce noise
+  as runs grow, integrate with CI/code-scanning pipelines, and give operators fast DB visibility without
+  needing ad-hoc SQLite poking.
+- Evidence:
+  `src/fleetmdm/cli.py`, `src/fleetmdm/store.py`, `src/fleetmdm/report.py`, `tests/test_cli.py`,
+  `tests/test_store.py`, `README.md`, `docs/CHANGELOG.md`, `docs/PROJECT.md`, `docs/ROADMAP.md`.
+- Verification Evidence:
+  `make check` (pass)
+  `make security` (pass)
+  Smoke (pass):
+  ```bash
+  tmpdir=$(mktemp -d)
+  cd "$tmpdir"
+  python3 -m venv .venv
+  . .venv/bin/activate
+  python -m pip -q install -U pip
+  python -m pip -q install -e /Users/sarvesh/code/fleet-mdm
+  fleetmdm init --db fleet.db
+  fleetmdm seed --db fleet.db
+  fleetmdm check --device mac-001 --db fleet.db --format json >/dev/null
+  fleetmdm check --device mac-001 --db fleet.db --format json >/dev/null
+  fleetmdm history --db fleet.db --format json --since 2000-01-01T00:00:00Z >/dev/null
+  fleetmdm drift --db fleet.db --format json --since 2000-01-01T00:00:00Z >/dev/null
+  fleetmdm drift --db fleet.db --format json --since 2000-01-01T00:00:00Z --policy disk-encryption >/dev/null
+  fleetmdm report --db fleet.db --format sarif > report.sarif
+  fleetmdm doctor --db fleet.db --format json >/dev/null
+  ```
+- Mistakes And Fixes:
+  - Root cause: built a dynamic SQL query string for `list_compliance_history`, which triggered Bandit B608.
+  - Fix: revert to static query variants and keep parameters separate from SQL text.
+  - Prevention: avoid string-built SQL in security-gated code paths; prefer explicit query branches.
+  - Root cause: introduced mixed tab/space indentation inside a multiline SQL schema string, failing ruff (E101).
+  - Fix: rewrite the schema string without tabs and keep indentation consistent.
+  - Prevention: avoid tabs in multiline strings; run `make check` before committing.
+- Commits:
+  `f47e683` (history/drift filters), `f2750fc` (SARIF report), `8f48f3c` (doctor + indexes + docs).
+- Confidence:
+  High.
+- Trust Label:
+  `verified-local`.
+- Market scan (bounded, untrusted):
+  - GitHub code scanning expects SARIF uploads and documents the SARIF schema/usage. https://docs.github.com/en/code-security/code-scanning/integrating-with-code-scanning/sarif-support-for-code-scanning
+  - Chef InSpec sets baseline expectations for compliance tooling reporters (JSON/JUnit). https://docs.chef.io/inspec/reporters/
+  - FleetDM emphasizes automation-first, CLI-driven workflows with exportable outputs. https://fleetdm.com/docs/using-fleet/fleetctl-cli#export
+
 ## 2026-02-09 - Cycle 1 - Evidence Key Rotation + Machine-Readable Verify
 - Decision:
   Add an evidence signing key lifecycle starter kit: `evidence keygen`, key-ID-aware `evidence verify --keyring-dir`, machine-readable verification reports (`--format json`), and configurable inventory facts redaction (`--redact-config`).

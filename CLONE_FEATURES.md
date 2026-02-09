@@ -55,6 +55,9 @@
 - Deterministic ordering across DB reads materially improves CI snapshot stability and audit diff readability.
 - Machine-readable CLI output should bypass rich rendering (`typer.echo`) to avoid line-wrapping that can corrupt long JSON strings.
 - Treat `last_seen` as a monotonic freshness guard: normalization + stale-ingest skipping prevents accidental rollbacks when inventory is ingested out-of-order.
+- `--since` and drift filters are cheap, high-value scale features: they keep history/drift usable once you have frequent runs.
+- SARIF output makes FleetMDM results first-class in code-scanning/compliance pipelines without forcing a hosted service.
+- A lightweight `doctor` command reduces operational friction (DB size, counts, pragmas, index visibility) and makes troubleshooting repeatable.
 
 ## Notes
 - This file is maintained by the autonomous clone loop.
