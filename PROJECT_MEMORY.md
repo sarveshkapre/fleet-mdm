@@ -163,8 +163,12 @@
   fleetmdm ingest older.json --db fleet2.db
   fleetmdm export --db fleet2.db --output inv.json
   ```
+- Mistakes And Fixes:
+  - Root cause: added a JUnit XML renderer using `xml.etree.ElementTree`, which Bandit flags (B405) by default even when used only for XML generation.
+  - Fix: add a targeted `# nosec B405` with justification in `src/fleetmdm/report.py`.
+  - Prevention: run `make security` before pushing, especially after introducing new imports.
 - Commits:
-  `230ded7` (cycle 3 task list), `edf64e5` (report junit), `7d94615` (policy YAML redaction), `4e89d37` (ingest normalization + stale guard).
+  `230ded7` (cycle 3 task list), `edf64e5` (report junit), `7d94615` (policy YAML redaction), `4e89d37` (ingest normalization + stale guard), `3851144` (Bandit suppression for safe XML generation).
 - Confidence:
   High.
 - Trust Label:

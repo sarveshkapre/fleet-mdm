@@ -29,3 +29,18 @@
   Pin versions and verify downloads with checksums for security-sensitive CI steps.
 - Status:
   Mitigated by replacing the action with a pinned gitleaks CLI install and running `gitleaks detect`.
+
+## 2026-02-09 - CI Security Gate Failure After Adding JUnit XML Output
+- Summary:
+  The GitHub Actions `security` job failed after adding JUnit XML output because Bandit flags `xml.etree.ElementTree` imports (B405) even when used only for XML generation.
+- Impact:
+  `main` briefly had failing CI runs on commits that introduced the JUnit renderer.
+- Root Cause:
+  Bandit blacklist heuristic (B405) on `xml.etree` imports; the implementation used ElementTree for serialization, not parsing.
+- Detection:
+  `make security` / GitHub Actions `security` job failure.
+- Prevention Rules:
+  Run `make security` before pushing.
+  When using a blacklisted module for safe-only usage (generation not parsing), document and suppress with a targeted `# nosec` + justification; otherwise prefer string rendering or a hardened XML library if parsing is needed.
+- Status:
+  Mitigated on `main` (commit `3851144`).
