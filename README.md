@@ -95,6 +95,7 @@ assignments exist, all policies apply to all devices.
 ### Evidence Packs
 - Export SOC-style evidence artifacts: `fleetmdm evidence export --output evidence/`
 - Redaction profiles: `--redact-profile none|minimal|strict`
+- Policy YAML redaction in evidence packs: `strict` redacts `raw_yaml`; `minimal` strips comment-only lines.
 - Additional facts redaction: `--redact-config ./redact.yml` (YAML/JSON allowlist/denylist for `facts.*`)
 - Optional manifest signing: `--signing-key-file ./evidence.key`
 - Generate a new signing key: `fleetmdm evidence keygen --keyring-dir ./keys`

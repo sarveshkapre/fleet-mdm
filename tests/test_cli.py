@@ -83,11 +83,68 @@ def test_evidence_export_strict_redaction_profile(tmp_path: Path) -> None:
     metadata = json.loads((output_dir / "metadata.json").read_text(encoding="utf-8"))
     inventory = json.loads((output_dir / "inventory.json").read_text(encoding="utf-8"))
     latest_run = json.loads((output_dir / "latest_run.json").read_text(encoding="utf-8"))
+    policies = json.loads((output_dir / "policies.json").read_text(encoding="utf-8"))
 
     assert metadata["redaction_profile"] == "strict"
+    assert metadata["policies_raw_yaml"] == "redacted"
     assert all(entry["device_id"].startswith("device-") for entry in inventory)
     assert all(entry["serial"].startswith("serial-") for entry in inventory)
     assert latest_run["results"][0]["device_id"].startswith("device-")
+    assert all(policy["raw_yaml"] is None for policy in policies)
+    assert all(policy["raw_yaml_redacted"] is True for policy in policies)
+
+
+def test_evidence_export_minimal_strips_policy_comment_lines(tmp_path: Path) -> None:
+    db_path = tmp_path / "fleet.db"
+    output_dir = tmp_path / "evidence-minimal"
+    policy_path = tmp_path / "policy.yaml"
+
+    policy_path.write_text(
+        "\n".join(
+            [
+                "# top comment should be stripped",
+                "id: disk-encryption",
+                "name: Disk Encryption Enabled",
+                "description: test policy",
+                "checks:",
+                "  - key: disk.encrypted",
+                "    op: eq",
+                "    value: true",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    assert runner.invoke(app, ["seed", "--db", str(db_path)]).exit_code == 0
+    assert (
+        runner.invoke(app, ["policy", "add", str(policy_path), "--db", str(db_path)]).exit_code
+        == 0
+    )
+
+    export = runner.invoke(
+        app,
+        [
+            "evidence",
+            "export",
+            "--db",
+            str(db_path),
+            "--output",
+            str(output_dir),
+            "--redact-profile",
+            "minimal",
+        ],
+    )
+    assert export.exit_code == 0
+
+    metadata = json.loads((output_dir / "metadata.json").read_text(encoding="utf-8"))
+    policies = json.loads((output_dir / "policies.json").read_text(encoding="utf-8"))
+    assert metadata["redaction_profile"] == "minimal"
+    assert metadata["policies_raw_yaml"] == "comment_stripped"
+
+    disk_policy = next(item for item in policies if item["policy_id"] == "disk-encryption")
+    assert disk_policy["raw_yaml_redacted"] is False
+    assert "# top comment" not in disk_policy["raw_yaml"]
 
 
 def test_evidence_export_sign_and_verify_detects_tamper(tmp_path: Path) -> None:

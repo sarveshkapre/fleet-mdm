@@ -501,6 +501,15 @@ def _redact_inventory_facts(
     return redacted
 
 
+def _strip_yaml_comment_only_lines(raw_yaml: str) -> str:
+    lines: list[str] = []
+    for line in raw_yaml.splitlines():
+        if line.lstrip().startswith("#"):
+            continue
+        lines.append(line.rstrip())
+    return "\n".join(lines).strip()
+
+
 @inventory_app.command("validate")
 def inventory_validate(
     path: Path = ARG_INVENTORY_JSON,
@@ -1298,13 +1307,24 @@ def evidence_export(
         policies: list[dict[str, Any]] = []
         for row in list_policies(conn):
             policy_id = str(row["policy_id"])
+            raw_yaml = get_policy_yaml(conn, policy_id) or ""
+            raw_yaml_value: str | None
+            raw_yaml_redacted = False
+            if profile == "none":
+                raw_yaml_value = raw_yaml
+            elif profile == "minimal":
+                raw_yaml_value = _strip_yaml_comment_only_lines(raw_yaml)
+            else:
+                raw_yaml_value = None
+                raw_yaml_redacted = True
             policies.append(
                 {
                     "policy_id": policy_id,
                     "name": str(row["name"]),
                     "description": row["description"],
                     "updated_at": str(row["updated_at"]),
-                    "raw_yaml": get_policy_yaml(conn, policy_id),
+                    "raw_yaml": raw_yaml_value,
+                    "raw_yaml_redacted": raw_yaml_redacted,
                 }
             )
 
@@ -1347,11 +1367,18 @@ def evidence_export(
     )
     redacted_inventory = _redact_inventory_facts(redacted_inventory, facts_redaction)
 
+    policies_raw_yaml = "full"
+    if profile == "minimal":
+        policies_raw_yaml = "comment_stripped"
+    elif profile == "strict":
+        policies_raw_yaml = "redacted"
+
     total_artifacts = 7 + (1 if signing_key_file else 0)
     metadata = {
         "generated_at": generated_at,
         "db_path": str(db_path),
         "redaction_profile": profile,
+        "policies_raw_yaml": policies_raw_yaml,
         "facts_redaction": (
             None
             if not facts_redaction
