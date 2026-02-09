@@ -7,10 +7,6 @@
 - Gaps found during codebase exploration
 
 ## Candidate Features To Do
-- [ ] P1 (Selected) - Inventory ingest correctness: normalize `last_seen` to ISO-8601 UTC, dedupe per payload by `device_id`, and prevent stale ingests from overwriting newer device state.
-- [ ] P1 (Selected) - Add `fleetmdm report --format junit` as a compliance pipeline integration primitive (JUnit XML stdout).
-- [ ] P1 (Selected) - Extend evidence redaction beyond inventory facts: redact `policies.json` `raw_yaml` in `--redact-profile strict` and strip comment-only lines in `minimal`.
-- [ ] P2 - CLI reliability: ensure read-only commands (for example `fleetmdm policy list`) initialize schema (`init_db`) before querying on fresh DB paths.
 - [ ] P2 - Add `history`/`drift` filters: `--since` (timestamp) and `--policy` for drift to reduce noise at scale.
 - [ ] P2 - Add `report --format sarif` as an alternative compliance pipeline output.
 - [ ] P3 - SQLite performance hardening: add indexes for history/results query paths and a `fleetmdm doctor` command to surface DB stats and common misconfigurations.
@@ -18,6 +14,10 @@
 - [ ] P3 - Optional read-only web dashboard for inventory + compliance + evidence verification status.
 
 ## Implemented
+- [x] 2026-02-09 - Inventory ingest correctness: normalize `last_seen`, dedupe per payload by `device_id`, and prevent stale ingests from overwriting newer device state. Evidence: `src/fleetmdm/store.py`, `src/fleetmdm/inventory.py`, `src/fleetmdm/cli.py`, `tests/test_store.py`, `tests/test_inventory.py`.
+- [x] 2026-02-09 - Added `fleetmdm report --format junit` (JUnit XML stdout) for pipeline ingestion. Evidence: `src/fleetmdm/report.py`, `src/fleetmdm/cli.py`, `tests/test_cli.py`, `README.md`.
+- [x] 2026-02-09 - Evidence packs: redact policy `raw_yaml` in `strict` and strip comment-only lines in `minimal`. Evidence: `src/fleetmdm/cli.py`, `tests/test_cli.py`, `README.md`.
+- [x] 2026-02-09 - CLI reliability: `fleetmdm policy list` now initializes schema (`init_db`) on fresh DB paths. Evidence: `src/fleetmdm/cli.py`.
 - [x] 2026-02-09 - Evidence signing key lifecycle metadata: keyring manifest (`keyring.json`), `fleetmdm evidence key list`, and `fleetmdm evidence key revoke` plus verify lifecycle checks (`signed_at`, activation/revocation windows). Evidence: `src/fleetmdm/cli.py`, `tests/test_cli.py`, smoke run.
 - [x] 2026-02-09 - Added `fleetmdm evidence verify --output <file>` (JSON) for CI/audit pipelines. Evidence: `src/fleetmdm/cli.py`, `tests/test_cli.py`, `README.md`.
 - [x] 2026-02-09 - Docs alignment: refreshed next improvements and roadmap to reflect shipped work. Evidence: `docs/PROJECT.md`, `docs/ROADMAP.md`, `docs/CHANGELOG.md`, `README.md`.
@@ -48,6 +48,7 @@
 - Evidence packs are significantly more audit-ready with manifest hashing, optional signatures, and a verify command, but key lifecycle management remains the next trust gap.
 - Deterministic ordering across DB reads materially improves CI snapshot stability and audit diff readability.
 - Machine-readable CLI output should bypass rich rendering (`typer.echo`) to avoid line-wrapping that can corrupt long JSON strings.
+- Treat `last_seen` as a monotonic freshness guard: normalization + stale-ingest skipping prevents accidental rollbacks when inventory is ingested out-of-order.
 
 ## Notes
 - This file is maintained by the autonomous clone loop.
