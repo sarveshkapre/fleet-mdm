@@ -36,6 +36,6 @@ make release
 ```
 
 ## Next 3 improvements
-1) More agent-side exporter examples (macOS: FileVault, OS update settings; Linux: disk encryption, kernel version) plus schema validation guidance.
-2) Reporting/scaling UX: add `report` and `drift` filters (`--policy`, `--device`) to reduce noise at scale.
-3) Optional read-only web dashboard for inventory + compliance + evidence verification status.
+1) Reporting UX for scale: add `report --only-failing` / `--only-skipped` (and maybe `--only-assigned`) to reduce noise.
+2) Drift UX: optionally include “new”/“missing” rows (policy/device present in one run but not the other) behind a flag.
+3) SARIF quality: optionally emit per-device failures (bounded) and include richer SARIF rule metadata (descriptions, help URIs).

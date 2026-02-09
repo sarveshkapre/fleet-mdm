@@ -6,7 +6,7 @@ import os
 import socket
 from typing import Any
 
-from _util import emit, parse_tags, utc_now_z
+from _util import emit, parse_tags, run, utc_now_z
 
 
 def _read_first(path: str) -> str | None:
@@ -35,6 +35,29 @@ def _os_version() -> str:
     return parsed.get("VERSION_ID") or parsed.get("PRETTY_NAME") or os.uname().release
 
 
+def _root_filesystem_encrypted() -> bool | None:
+    """
+    Best-effort detection of root filesystem encryption.
+
+    Heuristics:
+    - If `/` is mounted from a `crypt` (dm-crypt) device, treat as encrypted.
+    - If we can't determine the block device reliably (containers, overlayfs), return None.
+    """
+    source = run(["findmnt", "-n", "-o", "SOURCE", "/"])
+    if not source:
+        return None
+    source = source.strip()
+    if not source.startswith("/dev/"):
+        return None
+    dev_type = (run(["lsblk", "-no", "TYPE", source]) or "").strip().lower()
+    if dev_type == "crypt":
+        return True
+    fs_type = (run(["lsblk", "-no", "FSTYPE", source]) or "").strip().lower()
+    if fs_type in {"crypto_luks", "luks"}:
+        return True
+    return False
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Emit FleetMDM inventory JSON (Linux).")
     parser.add_argument("--device-id", default="", help="Override device_id")
@@ -51,7 +74,11 @@ def main() -> None:
 
     facts: dict[str, Any] = {
         "cpu": {"cores": os.cpu_count() or 0},
+        "kernel": {"release": os.uname().release},
     }
+    encrypted = _root_filesystem_encrypted()
+    if encrypted is not None:
+        facts["disk"] = {"encrypted": encrypted}
     tags = parse_tags(args.tags)
     if tags:
         facts["tags"] = tags
@@ -71,4 +98,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

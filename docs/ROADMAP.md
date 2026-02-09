@@ -1,8 +1,9 @@
 # Roadmap
 
 ## Near term
-- More agent-side exporter examples (macOS: FileVault, OS update settings; Linux: disk encryption, kernel version) plus schema validation guidance.
-- Reporting/scaling UX: add `report` and `drift` filters (`--policy`, `--device`) to reduce noise at scale.
+- Reporting UX for scale: add `report --only-failing` / `--only-skipped` (and maybe `--only-assigned`) to reduce noise.
+- Drift UX: optionally include “new”/“missing” rows (policy/device present in one run but not the other) behind a flag.
+- More agent-side exporter examples beyond the current macOS/Linux baseline (macOS: firewall, OS update deferrals; Linux: secure boot, disk layout) plus schema validation guidance.
 - Optional read-only web dashboard for inventory + compliance + evidence verification status.
 
 ## Later

@@ -41,6 +41,39 @@ def _filevault_enabled() -> bool | None:
     return None
 
 
+def _parse_defaults_bool(value: str | None) -> bool | None:
+    if value is None:
+        return None
+    text = value.strip().lower()
+    if text in {"1", "true", "yes"}:
+        return True
+    if text in {"0", "false", "no"}:
+        return False
+    return None
+
+
+def _read_softwareupdate_defaults() -> dict[str, bool]:
+    # Best-effort read of common software update preference keys.
+    # These keys may vary by macOS version and local policy; missing keys are omitted.
+    domain = "/Library/Preferences/com.apple.SoftwareUpdate"
+    keys = {
+        "automatic_check_enabled": "AutomaticCheckEnabled",
+        "automatic_download": "AutomaticDownload",
+        "critical_update_install": "CriticalUpdateInstall",
+        "config_data_install": "ConfigDataInstall",
+        "auto_install_macos_updates": "AutomaticallyInstallMacOSUpdates",
+    }
+
+    updates: dict[str, bool] = {}
+    for out_key, pref_key in keys.items():
+        raw = run(["defaults", "read", domain, pref_key])
+        parsed = _parse_defaults_bool(raw)
+        if parsed is None:
+            continue
+        updates[out_key] = parsed
+    return updates
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Emit FleetMDM inventory JSON (macOS).")
     parser.add_argument("--device-id", default="", help="Override device_id")
@@ -58,6 +91,10 @@ def main() -> None:
     encrypted = _filevault_enabled()
     if encrypted is not None:
         facts["disk"] = {"encrypted": encrypted}
+
+    updates = _read_softwareupdate_defaults()
+    if updates:
+        facts["updates"] = updates
 
     tags = parse_tags(args.tags)
     if tags:
