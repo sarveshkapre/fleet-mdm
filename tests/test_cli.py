@@ -563,6 +563,41 @@ def test_report_sarif_format_emits_results(tmp_path: Path) -> None:
     assert results[0]["ruleId"] == "disk-encryption"
 
 
+def test_report_policy_filter_limits_output(tmp_path: Path) -> None:
+    db_path = tmp_path / "fleet.db"
+    policy_path = tmp_path / "policy.yaml"
+
+    policy_path.write_text(
+        "\n".join(
+            [
+                "id: disk-encryption",
+                "name: Disk Encryption Enabled",
+                "checks:",
+                "  - key: disk.encrypted",
+                "    op: eq",
+                "    value: true",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    assert runner.invoke(app, ["seed", "--db", str(db_path)]).exit_code == 0
+    assert (
+        runner.invoke(app, ["policy", "add", str(policy_path), "--db", str(db_path)]).exit_code
+        == 0
+    )
+
+    result = runner.invoke(
+        app,
+        ["report", "--db", str(db_path), "--format", "json", "--policy", "disk-encryption"],
+    )
+    assert result.exit_code == 0
+    rows = json.loads(result.stdout)
+    assert len(rows) == 1
+    assert rows[0]["policy_id"] == "disk-encryption"
+
+
 def test_history_since_filters_rows(tmp_path: Path) -> None:
     db_path = tmp_path / "fleet.db"
     init_db(db_path)
@@ -739,6 +774,101 @@ def test_drift_supports_since_and_policy_filters(tmp_path: Path) -> None:
 
     rows = json.loads(filtered.stdout)
     assert len(rows) == 1
+    assert rows[0]["policy_id"] == "disk-encryption"
+    assert rows[0]["previous"] == "pass"
+    assert rows[0]["current"] == "fail"
+
+
+def test_drift_device_filter_limits_output(tmp_path: Path) -> None:
+    db_path = tmp_path / "fleet.db"
+    init_db(db_path)
+
+    device1 = {
+        "device_id": "mac-001",
+        "hostname": "studio-1",
+        "os": "macos",
+        "os_version": "14.4",
+        "serial": "C02XYZ123",
+        "last_seen": "2026-02-01T15:30:00Z",
+        "facts": {"disk": {"encrypted": True}},
+    }
+    device2 = {
+        "device_id": "mac-002",
+        "hostname": "studio-2",
+        "os": "macos",
+        "os_version": "14.4",
+        "serial": "C02XYZ124",
+        "last_seen": "2026-02-01T15:30:00Z",
+        "facts": {"disk": {"encrypted": True}},
+    }
+    policy_yaml = "\n".join(
+        [
+            "id: disk-encryption",
+            "name: Disk Encryption Enabled",
+            "checks:",
+            "  - key: disk.encrypted",
+            "    op: eq",
+            "    value: true",
+            "",
+        ]
+    )
+
+    with connect(db_path) as conn:
+        ingest_devices(conn, [device1, device2])
+        add_policy(conn, "disk-encryption", "Disk Encryption Enabled", None, policy_yaml)
+
+        run1 = create_compliance_run(conn, started_at="2026-02-01T00:00:00Z")
+        add_compliance_result(
+            conn,
+            run1,
+            "mac-001",
+            "disk-encryption",
+            "Disk Encryption Enabled",
+            "pass",
+            "",
+            checked_at="2026-02-01T00:00:00Z",
+        )
+        add_compliance_result(
+            conn,
+            run1,
+            "mac-002",
+            "disk-encryption",
+            "Disk Encryption Enabled",
+            "pass",
+            "",
+            checked_at="2026-02-01T00:00:00Z",
+        )
+
+        run2 = create_compliance_run(conn, started_at="2026-02-03T00:00:00Z")
+        add_compliance_result(
+            conn,
+            run2,
+            "mac-001",
+            "disk-encryption",
+            "Disk Encryption Enabled",
+            "fail",
+            "disk.encrypted",
+            checked_at="2026-02-03T00:00:00Z",
+        )
+        add_compliance_result(
+            conn,
+            run2,
+            "mac-002",
+            "disk-encryption",
+            "Disk Encryption Enabled",
+            "pass",
+            "",
+            checked_at="2026-02-03T00:00:00Z",
+        )
+
+    result = runner.invoke(
+        app,
+        ["drift", "--db", str(db_path), "--format", "json", "--device", "mac-001"],
+    )
+    assert result.exit_code == 0
+    rows = json.loads(result.stdout)
+    assert len(rows) == 1
+    assert rows[0]["device_id"] == "mac-001"
     assert rows[0]["policy_id"] == "disk-encryption"
     assert rows[0]["previous"] == "pass"
     assert rows[0]["current"] == "fail"

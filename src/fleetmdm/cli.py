@@ -49,6 +49,7 @@ from fleetmdm.store import (
     export_inventory,
     get_device,
     get_device_facts,
+    get_policy,
     get_policy_yaml,
     get_tag_assigned_policies,
     has_any_policy_assignments,
@@ -206,9 +207,20 @@ def _load_devices_from_json(path: Path) -> list[dict[str, Any]]:
 def _compute_drift_changes(
     latest: Sequence[Any], previous: Sequence[Any]
 ) -> list[dict[str, str]]:
-    latest_map = {
-        (str(row["device_id"]), str(row["policy_id"])): str(row["status"]) for row in latest
-    }
+    latest_map: dict[tuple[str, str], dict[str, str]] = {}
+    for row in latest:
+        device_id = str(row["device_id"])
+        policy_id = str(row["policy_id"])
+        policy_name_value: Any = None
+        try:
+            policy_name_value = row["policy_name"]
+        except Exception:
+            policy_name_value = None
+        policy_name = "" if policy_name_value is None else str(policy_name_value)
+        latest_map[(device_id, policy_id)] = {
+            "status": str(row["status"]),
+            "policy_name": policy_name,
+        }
     previous_map = {
         (str(row["device_id"]), str(row["policy_id"])): str(row["status"]) for row in previous
     }
@@ -216,15 +228,16 @@ def _compute_drift_changes(
     changes: list[dict[str, str]] = []
     for key, current in latest_map.items():
         previous_status = previous_map.get(key)
-        if previous_status is None or previous_status == current:
+        if previous_status is None or previous_status == current["status"]:
             continue
         device_id, policy_id = key
         changes.append(
             {
                 "device_id": device_id,
                 "policy_id": policy_id,
+                "policy_name": current.get("policy_name", ""),
                 "previous": previous_status,
-                "current": current,
+                "current": current["status"],
             }
         )
     return changes
@@ -930,15 +943,36 @@ def check(
 @app.command()
 def report(
     format: str = typer.Option("table", "--format", help="table/json/csv/junit/sarif"),
+    device_id: str | None = OPT_DEVICE_OPTIONAL,
+    policy_id: str | None = OPT_POLICY_ID_OPTIONAL,
     db: str | None = OPT_DB,
 ) -> None:
     """Summary compliance report across devices."""
+    normalized_device_id = (device_id or "").strip() or None
+    normalized_policy_id = (policy_id or "").strip() or None
+
     db_path = resolve_db_path(db)
     init_db(db_path)
     with connect(db_path) as conn:
         assignment_mode = has_any_policy_assignments(conn)
-        policy_rows = list_policies(conn)
-        device_rows = list_devices(conn)
+        if normalized_policy_id:
+            policy_row = get_policy(conn, normalized_policy_id)
+            if policy_row is None:
+                console.print(f"Policy not found: {normalized_policy_id}")
+                raise typer.Exit(code=1)
+            policy_rows = [policy_row]
+        else:
+            policy_rows = list_policies(conn)
+
+        if normalized_device_id:
+            device_row = get_device(conn, normalized_device_id)
+            if device_row is None:
+                console.print(f"Device not found: {normalized_device_id}")
+                raise typer.Exit(code=1)
+            device_rows = [device_row]
+        else:
+            device_rows = list_devices(conn)
+
         if not policy_rows or not device_rows:
             console.print("No data to report")
             raise typer.Exit(code=1)
@@ -951,21 +985,23 @@ def report(
                 "passed_count": 0,
                 "failed_count": 0,
             }
+        selected_policy_ids = {str(policy["policy_id"]) for policy in policy_rows}
 
         for device in device_rows:
             facts = get_device_facts(conn, device["device_id"]) or {}
             device_data = dict(device)
             evaluation_context = _build_evaluation_context(device_data, facts)
             tags = _extract_device_tags(facts)
-            applicable = (
-                resolve_assigned_policies_for_device(conn, device["device_id"], tags)
-                if assignment_mode
-                else [row["policy_id"] for row in policy_rows]
-            )
+            applicable = resolve_assigned_policies_for_device(conn, device["device_id"], tags)
+            if not assignment_mode:
+                applicable = [str(row["policy_id"]) for row in policy_rows]
             if assignment_mode and not applicable:
                 continue
             for pid in applicable:
-                raw_yaml = get_policy_yaml(conn, pid)
+                pid_text = str(pid)
+                if pid_text not in selected_policy_ids:
+                    continue
+                raw_yaml = get_policy_yaml(conn, pid_text)
                 if not raw_yaml:
                     continue
                 policy = load_policy(raw_yaml)
@@ -973,9 +1009,9 @@ def report(
                     continue
                 result = evaluate_policy(policy, evaluation_context)
                 if result.passed:
-                    summary[pid]["passed_count"] += 1
+                    summary[pid_text]["passed_count"] += 1
                 else:
-                    summary[pid]["failed_count"] += 1
+                    summary[pid_text]["failed_count"] += 1
 
     if format == "json":
         console.print(json.dumps(list(summary.values()), indent=2))
@@ -1055,11 +1091,15 @@ def history(
 @app.command()
 def drift(
     policy_id: str | None = OPT_POLICY_ID_OPTIONAL,
+    device_id: str | None = OPT_DEVICE_OPTIONAL,
     since: str | None = OPT_SINCE,
     format: str = typer.Option("table", "--format", help="table/json/csv"),
     db: str | None = OPT_DB,
 ) -> None:
     """Compare the last two compliance runs and show status changes."""
+    normalized_policy_id = (policy_id or "").strip() or None
+    normalized_device_id = (device_id or "").strip() or None
+
     db_path = resolve_db_path(db)
     init_db(db_path)
     with connect(db_path) as conn:
@@ -1069,18 +1109,26 @@ def drift(
             raise typer.Exit(code=1)
         latest_run = runs[0]["run_id"]
         previous_run = runs[1]["run_id"]
-        latest = list_results_for_run(conn, latest_run, policy_id=policy_id)
-        previous = list_results_for_run(conn, previous_run, policy_id=policy_id)
+        latest = list_results_for_run(
+            conn, latest_run, policy_id=normalized_policy_id, device_id=normalized_device_id
+        )
+        previous = list_results_for_run(
+            conn,
+            previous_run,
+            policy_id=normalized_policy_id,
+            device_id=normalized_device_id,
+        )
     changes = _compute_drift_changes(latest, previous)
 
     if format == "json":
         console.print(json.dumps(changes, indent=2))
         return
     if format == "csv":
-        lines = ["device_id,policy_id,previous,current"]
+        lines = ["device_id,policy_id,policy_name,previous,current"]
         for row in changes:
             lines.append(
-                f"{row['device_id']},{row['policy_id']},{row['previous']},{row['current']}"
+                f"{row['device_id']},{row['policy_id']},{row.get('policy_name','')},"
+                f"{row['previous']},{row['current']}"
             )
         console.print("\n".join(lines))
         return
@@ -1094,7 +1142,14 @@ def drift(
         table.add_row("(none)", "", "", "")
     else:
         for row in changes:
-            table.add_row(row["device_id"], row["policy_id"], row["previous"], row["current"])
+            policy_name = (row.get("policy_name") or "").strip()
+            policy_id_value = row["policy_id"]
+            policy_label = policy_id_value
+            if policy_name and policy_name != policy_id_value:
+                policy_label = f"{policy_name} ({policy_id_value})"
+            elif policy_name:
+                policy_label = policy_name
+            table.add_row(row["device_id"], policy_label, row["previous"], row["current"])
     console.print(table)
 
 

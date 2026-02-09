@@ -7,9 +7,9 @@
 - Gaps found during codebase exploration
 
 ## Candidate Features To Do
-- [ ] P2 - More agent-side exporter examples (macOS: FileVault, OS update settings; Linux: disk encryption, kernel version) plus schema validation guidance.
-- [ ] P2 - Reporting/scaling UX: add `report` filters (`--policy`, `--device`) to reduce noise at scale.
-- [ ] P2 - Drift UX: add `drift --device` filter and include policy names in drift output.
+- [ ] P1 - More agent-side exporter examples (macOS: OS update settings; Linux: disk encryption, kernel version) plus schema validation guidance.
+- [ ] P2 - Report UX: add `report --only-failing` and `report --only-skipped` switches for big fleets.
+- [ ] P2 - Drift UX: include “new”/“missing” rows (policy/device present in one run but not the other) behind a flag.
 - [ ] P2 - SARIF quality: optionally emit per-device failures (with a cap) and include richer SARIF rule metadata (descriptions, help URIs).
 - [ ] P3 - Evidence packs: optionally include bounded `history` excerpts in evidence bundles for audit trails.
 - [ ] P3 - `fleetmdm doctor` enhancements: optional `--integrity-check` and `--vacuum` guidance/automation.
@@ -17,6 +17,9 @@
 - [ ] P3 - Optional read-only web dashboard for inventory + compliance + evidence verification status.
 
 ## Implemented
+- [x] 2026-02-09 - Reporting/scaling UX: add `report --policy` and `report --device` filters. Evidence: `src/fleetmdm/cli.py`, `src/fleetmdm/store.py`, `tests/test_cli.py`, `README.md`.
+- [x] 2026-02-09 - Drift UX: add `drift --device` filter and include `policy_name` in drift output (json/csv/table). Evidence: `src/fleetmdm/cli.py`, `src/fleetmdm/store.py`, `tests/test_cli.py`, `README.md`.
+- [x] 2026-02-09 - Tooling: fix `make dev` to run `python -m fleetmdm.cli` (package has no `__main__`). Evidence: `Makefile`.
 - [x] 2026-02-09 - SQLite performance hardening: additional indexes for history/results query paths and `fleetmdm doctor` (DB stats + health signals). Evidence: `src/fleetmdm/store.py`, `src/fleetmdm/cli.py`, `tests/test_cli.py`, `README.md`.
 - [x] 2026-02-09 - Added `fleetmdm report --format sarif` for code-scanning/compliance pipeline integration. Evidence: `src/fleetmdm/report.py`, `src/fleetmdm/cli.py`, `tests/test_cli.py`, `README.md`.
 - [x] 2026-02-09 - Added `history` and `drift` filters (`--since` and `drift --policy`) for scale and noise reduction. Evidence: `src/fleetmdm/cli.py`, `src/fleetmdm/store.py`, `tests/test_store.py`, `tests/test_cli.py`, `README.md`.

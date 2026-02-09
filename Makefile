@@ -9,7 +9,7 @@ setup:
 	$(VENV)/bin/python -m pip install -e ".[dev]"
 
 dev:
-	$(PY) -m fleetmdm --help
+	$(PY) -m fleetmdm.cli --help
 
 test:
 	$(PY) -m pytest

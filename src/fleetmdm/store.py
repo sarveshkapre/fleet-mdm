@@ -209,6 +209,17 @@ def list_policies(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     ).fetchall()
 
 
+def get_policy(conn: sqlite3.Connection, policy_id: str) -> sqlite3.Row | None:
+    return conn.execute(
+        """
+        SELECT policy_id, name, description, updated_at
+        FROM policies
+        WHERE policy_id = ?
+        """,
+        (policy_id,),
+    ).fetchone()
+
+
 def get_policy_yaml(conn: sqlite3.Connection, policy_id: str) -> str | None:
     row = conn.execute("SELECT raw_yaml FROM policies WHERE policy_id = ?", (policy_id,)).fetchone()
     if not row:
@@ -562,8 +573,21 @@ def list_recent_runs(
 
 
 def list_results_for_run(
-    conn: sqlite3.Connection, run_id: str, policy_id: str | None = None
+    conn: sqlite3.Connection,
+    run_id: str,
+    policy_id: str | None = None,
+    device_id: str | None = None,
 ) -> list[sqlite3.Row]:
+    if policy_id and device_id:
+        return conn.execute(
+            """
+            SELECT device_id, policy_id, policy_name, status, failed_checks, checked_at
+            FROM compliance_results
+            WHERE run_id = ? AND policy_id = ? AND device_id = ?
+            ORDER BY device_id, policy_id
+            """,
+            (run_id, policy_id, device_id),
+        ).fetchall()
     if policy_id:
         return conn.execute(
             """
@@ -573,6 +597,16 @@ def list_results_for_run(
             ORDER BY device_id, policy_id
             """,
             (run_id, policy_id),
+        ).fetchall()
+    if device_id:
+        return conn.execute(
+            """
+            SELECT device_id, policy_id, policy_name, status, failed_checks, checked_at
+            FROM compliance_results
+            WHERE run_id = ? AND device_id = ?
+            ORDER BY device_id, policy_id
+            """,
+            (run_id, device_id),
         ).fetchall()
     return conn.execute(
         """
