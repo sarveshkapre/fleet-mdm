@@ -100,3 +100,76 @@
   `verified-local`.
 - Market scan (bounded, untrusted):
   - NIST OSCAL: standardized compliance/evidence models that many audit pipelines expect to integrate with. https://pages.nist.gov/OSCAL/
+
+## 2026-02-09 - Cycle 3 - Compliance Pipeline Outputs + Ingest Freshness Guard
+- Recent Decisions:
+  Add `fleetmdm report --format junit`, extend evidence export redaction to policy `raw_yaml` (redacted in `--redact-profile strict`, comment-only lines stripped in `minimal`), and harden inventory ingest by normalizing `last_seen` and skipping stale updates (plus dedupe per payload by `device_id`).
+- Why:
+  JUnit XML output makes it trivial to plug FleetMDM into CI/compliance gates, policy YAML redaction reduces the chance of leaking sensitive policy content into evidence bundles, and monotonic `last_seen` prevents accidental state rollbacks when inventory is ingested out of order.
+- Evidence:
+  `src/fleetmdm/report.py`, `src/fleetmdm/cli.py`, `src/fleetmdm/store.py`, `src/fleetmdm/inventory.py`, `tests/test_cli.py`, `tests/test_store.py`, `tests/test_inventory.py`, `README.md`, `docs/CHANGELOG.md`, `CLONE_FEATURES.md`.
+- Verification Evidence:
+  `make check` (pass)
+  `make security` (pass; Bandit clean, pip-audit clean)
+  Smoke (pass):
+  ```bash
+  tmpdir=$(mktemp -d)
+  cd "$tmpdir"
+  python3 -m venv .venv
+  . .venv/bin/activate
+  python -m pip -q install -e /Users/sarvesh/code/fleet-mdm
+
+  fleetmdm init --db fleet1.db
+  fleetmdm seed --db fleet1.db
+  fleetmdm report --db fleet1.db --format junit > report.xml
+
+  cat > policy.yaml <<'YAML'
+  # comment line should be stripped
+  id: disk-encryption
+  name: Disk Encryption Enabled
+  checks:
+    - key: disk.encrypted
+      op: eq
+      value: true
+  YAML
+  fleetmdm policy add policy.yaml --db fleet1.db
+  fleetmdm evidence export --db fleet1.db --output evidence-min --redact-profile minimal
+  fleetmdm evidence export --db fleet1.db --output evidence-strict --redact-profile strict
+
+  fleetmdm init --db fleet2.db
+  cat > newer.json <<'JSON'
+  {
+    "device_id": "mac-999",
+    "hostname": "studio-9",
+    "os": "macos",
+    "os_version": "14.4",
+    "serial": "C02XYZ999",
+    "last_seen": "2026-02-02T00:00:00Z",
+    "facts": {"disk": {"encrypted": true}}
+  }
+  JSON
+  cat > older.json <<'JSON'
+  {
+    "device_id": "mac-999",
+    "hostname": "studio-9",
+    "os": "macos",
+    "os_version": "14.4",
+    "serial": "C02XYZ999",
+    "last_seen": "2026-02-01T00:00:00Z",
+    "facts": {"disk": {"encrypted": false}}
+  }
+  JSON
+  fleetmdm ingest newer.json --db fleet2.db
+  fleetmdm ingest older.json --db fleet2.db
+  fleetmdm export --db fleet2.db --output inv.json
+  ```
+- Commits:
+  `230ded7` (cycle 3 task list), `edf64e5` (report junit), `7d94615` (policy YAML redaction), `4e89d37` (ingest normalization + stale guard).
+- Confidence:
+  High.
+- Trust Label:
+  `verified-local`.
+- Market scan (bounded, untrusted):
+  - Chef InSpec supports standard JUnit XML reporting via its `junit2` reporter (baseline CI ingestion expectation). https://docs.chef.io/inspec/5.23/configure/reporters/
+  - Kandji positions reporting for compliance and audit readiness as a first-class workflow (UX expectation: fast, low-friction reporting). https://www.kandji.io/features/prism/
+  - FleetDM emphasizes automation-first, CLI-driven workflows (baseline expectation: exportable/machine-readable outputs). https://fleetdm.com/docs/using-fleet/configuration-files
