@@ -1,5 +1,7 @@
 VENV?=.venv
-PY=$(VENV)/bin/python
+PY?=$(if $(wildcard $(VENV)/bin/python),$(VENV)/bin/python,python3)
+
+.PHONY: setup dev test lint typecheck build security check release
 
 setup:
 	python3 -m venv $(VENV)

@@ -12,8 +12,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: python -m pip install -U pip
-      - run: pip install -e ".[dev]"
+      - run: make setup
       - run: make check
 
   security:
@@ -23,8 +22,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: python -m pip install -U pip
-      - run: pip install -e ".[dev]"
+      - run: make setup
       - run: make security
 
   secrets:
