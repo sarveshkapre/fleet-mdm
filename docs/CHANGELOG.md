@@ -1,6 +1,11 @@
 # Changelog
 
 ## Unreleased (2026-02-09)
+- Add deterministic evidence `manifest.json` generation with per-artifact SHA256 and bundle fingerprinting.
+- Add `fleetmdm evidence verify` to validate evidence integrity and optional HMAC signatures.
+- Add evidence export redaction profiles (`none`, `minimal`, `strict`) for device identifiers and serials.
+- Add optional `--signing-key-file` support for HMAC-signed evidence manifests (`signature.json`).
+- Improve deterministic ordering across policy/device/script/result DB read paths for stable exports and snapshots.
 - Add `fleetmdm evidence export` to generate SOC-style evidence bundles (`metadata`, `inventory`, `policies`, `assignments`, `latest_run`, `drift`).
 - Fix CI environment parity: `make` now works with or without a local `.venv`, and GitHub Actions uses `make setup`.
 - Fix `fleetmdm script list` on fresh databases by ensuring schema initialization.
