@@ -1,6 +1,7 @@
 import json
 import time
 from pathlib import Path
+from xml.etree import ElementTree as ET
 
 from typer.testing import CliRunner
 
@@ -417,3 +418,43 @@ def test_evidence_export_redact_config_applies_to_facts(tmp_path: Path) -> None:
     mac = next(item for item in inventory if item["device_id"] == "mac-001")
     assert mac["facts"]["disk"]["encrypted"] is True
     assert mac["facts"]["cpu"]["cores"] == "[REDACTED]"
+
+
+def test_report_junit_format_emits_failures(tmp_path: Path) -> None:
+    db_path = tmp_path / "fleet.db"
+    policy_path = tmp_path / "policy.yaml"
+
+    policy_path.write_text(
+        "\n".join(
+            [
+                "id: disk-encryption",
+                "name: Disk Encryption Enabled",
+                "checks:",
+                "  - key: disk.encrypted",
+                "    op: eq",
+                "    value: true",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    assert runner.invoke(app, ["seed", "--db", str(db_path)]).exit_code == 0
+    assert (
+        runner.invoke(app, ["policy", "add", str(policy_path), "--db", str(db_path)]).exit_code
+        == 0
+    )
+
+    result = runner.invoke(app, ["report", "--db", str(db_path), "--format", "junit"])
+    assert result.exit_code == 0
+
+    root = ET.fromstring(result.stdout)
+    assert root.tag == "testsuite"
+    assert root.attrib["tests"] == "2"
+    assert root.attrib["failures"] == "1"
+
+    cases = root.findall("testcase")
+    assert any(case.attrib.get("name") == "disk-encryption" for case in cases)
+    failing = [case for case in cases if case.attrib.get("name") == "disk-encryption"]
+    assert failing
+    assert failing[0].find("failure") is not None
