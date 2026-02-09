@@ -9,9 +9,32 @@
   `src/fleetmdm/cli.py`, `tests/test_cli.py`, `README.md`, `docs/CHANGELOG.md`, `docs/PROJECT.md`.
 - Verification:
   `make setup` (pass), `make check` (pass), `make security` (pass).
-  Smoke: create DB, seed, check, `evidence keygen`, signed+strict+redact-config `evidence export`, `evidence verify --keyring-dir`, `evidence verify --format json` parse/assert (pass).
+  Smoke (pass):
+  ```bash
+  tmpdir=$(mktemp -d)
+  cd "$tmpdir"
+  python3 -m venv .venv
+  . .venv/bin/activate
+  python -m pip -q install -e /Users/sarvesh/code/fleet-mdm
+  fleetmdm init --db fleet.db
+  fleetmdm seed --db fleet.db
+  fleetmdm check --device mac-001 --db fleet.db --format json >/dev/null
+  mkdir keys
+  fleetmdm evidence keygen --keyring-dir keys >/dev/null
+  keyfile=$(ls keys/*.key | head -n1)
+  cat > redact.yml <<'YAML'
+  facts_allowlist:
+    - disk.encrypted
+    - cpu.cores
+  facts_denylist:
+    - cpu.cores
+  YAML
+  fleetmdm evidence export --db fleet.db --output evidence --signing-key-file "$keyfile" --redact-profile strict --redact-config redact.yml >/dev/null
+  fleetmdm evidence verify evidence --keyring-dir keys >/dev/null
+  fleetmdm evidence verify evidence --keyring-dir keys --format json | python -c 'import json,sys; r=json.load(sys.stdin); assert r["ok"] is True and r["signature"]["verified"] is True'
+  ```
 - Commit:
-  `943b662` (feature + tests).
+  `943b662` (feature + tests), `a5c7f63` (docs + trackers).
 - Confidence:
   High.
 - Trust Label:
