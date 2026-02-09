@@ -5,8 +5,8 @@ PY?=$(if $(wildcard $(VENV)/bin/python),$(VENV)/bin/python,python3)
 
 setup:
 	python3 -m venv $(VENV)
-	$(PY) -m pip install -U pip
-	$(PY) -m pip install -e ".[dev]"
+	$(VENV)/bin/python -m pip install -U pip
+	$(VENV)/bin/python -m pip install -e ".[dev]"
 
 dev:
 	$(PY) -m fleetmdm --help
