@@ -13,6 +13,7 @@
 - [ ] P3 - Optional read-only web dashboard for inventory + compliance + evidence verification status.
 
 ## Implemented
+- [x] 2026-02-09 - Fixed CI secret scanning by replacing `gitleaks-action@v2` (license-gated) with pinned gitleaks CLI install + checksum verification. Evidence: `.github/workflows/ci.yml`.
 - [x] 2026-02-09 - Tracked repo-wide `AGENTS.md` contract and refreshed session task tracker. Evidence: `AGENTS.md`, `CLONE_FEATURES.md`.
 - [x] 2026-02-09 - Evidence signing key rotation workflow: add `fleetmdm evidence keygen` and `evidence verify --keyring-dir` (key-ID selection). Evidence: `src/fleetmdm/cli.py`, `tests/test_cli.py`, `README.md`.
 - [x] 2026-02-09 - Machine-readable evidence verification report output: `fleetmdm evidence verify --format json`. Evidence: `src/fleetmdm/cli.py`, `tests/test_cli.py`, smoke run.

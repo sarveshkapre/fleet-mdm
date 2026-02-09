@@ -14,3 +14,18 @@
   Verify workflow commands consume the same dependency environment before merging.
 - Status:
   Mitigated on `main`; keep monitoring new workflow changes for parity regressions.
+
+## 2026-02-09 - CI Secrets Scan Failure Due To gitleaks-action License Requirement
+- Summary:
+  The `secrets` GitHub Actions job failed because `gitleaks/gitleaks-action@v2` began enforcing a license key in this environment.
+- Impact:
+  CI was red on pushes even though the code and tests were passing.
+- Root Cause:
+  Dependency on an action that introduced an external license requirement and also hit unauthenticated GitHub API rate limits.
+- Detection:
+  GitHub Actions log error: "missing gitleaks license" (run `21814144161`).
+- Prevention Rules:
+  Prefer OSS tooling invocation (pinned binaries with checksum verification) over actions that can change licensing behavior.
+  Pin versions and verify downloads with checksums for security-sensitive CI steps.
+- Status:
+  Mitigated by replacing the action with a pinned gitleaks CLI install and running `gitleaks detect`.

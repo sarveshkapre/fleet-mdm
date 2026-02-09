@@ -29,7 +29,27 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: gitleaks/gitleaks-action@v2
+        with:
+          fetch-depth: 0
+      # gitleaks-action@v2 requires a proprietary license key; install OSS gitleaks directly instead.
+      - name: Install gitleaks
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="8.30.0"
+          ARCH="linux_x64"
+          URL="https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_${ARCH}.tar.gz"
+          TARBALL="/tmp/gitleaks.tgz"
+          curl -fsSL "$URL" -o "$TARBALL"
+          echo "79a3ab579b53f71efd634f3aaf7e04a0fa0cf206b7ed434638d1547a2470a66e  $TARBALL" | sha256sum -c -
+          tar -xzf "$TARBALL" -C /tmp
+          install -m 0755 /tmp/gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+      - name: Run gitleaks
+        shell: bash
+        run: |
+          set -euo pipefail
+          gitleaks detect --source . --redact --verbose
 
   dependency-review:
     if: github.event_name == 'pull_request'
