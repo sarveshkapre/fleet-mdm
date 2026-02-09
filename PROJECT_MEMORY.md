@@ -10,7 +10,7 @@
 - Verification:
   `make check`, `make security`, CLI smoke path with signed strict-redacted bundle export + verify.
 - Commit:
-  Pending in-session commit on `main`.
+  `55c70d5`, `9643e7d`.
 - Confidence:
   High.
 - Trust Label:
