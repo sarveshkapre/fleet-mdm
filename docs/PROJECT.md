@@ -36,6 +36,6 @@ make release
 ```
 
 ## Next 3 improvements
-1) Extend evidence redaction controls beyond inventory facts (for example, policy YAML `raw_yaml` redaction).
-2) Inventory ingest dedupe/upsert by `device_id` for correctness and scale.
-3) Compliance pipeline integration output (for example, `report --format junit`).
+1) Add `history`/`drift` filters: `--since` and drift `--policy` for scale.
+2) Add compliance pipeline integration outputs beyond JUnit (for example, `report --format sarif`).
+3) SQLite performance hardening: indexes + `fleetmdm doctor` for DB stats and misconfiguration checks.
