@@ -1,4 +1,5 @@
 import json
+import time
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -189,7 +190,14 @@ def test_evidence_keyring_verify_and_json_report(tmp_path: Path) -> None:
     keygen = runner.invoke(app, ["evidence", "keygen", "--keyring-dir", str(keyring_dir)])
     assert keygen.exit_code == 0
     key_files = sorted([p for p in keyring_dir.iterdir() if p.is_file()])
-    assert len(key_files) == 1
+    # key file + keyring.json manifest
+    assert any(p.name == "keyring.json" for p in key_files)
+    key_paths = sorted([p for p in key_files if p.suffix == ".key"])
+    assert len(key_paths) == 1
+    manifest = json.loads((keyring_dir / "keyring.json").read_text(encoding="utf-8"))
+    assert manifest["schema_version"] == 1
+    assert len(manifest["keys"]) == 1
+    assert manifest["keys"][0]["status"] == "active"
 
     export = runner.invoke(
         app,
@@ -201,7 +209,7 @@ def test_evidence_keyring_verify_and_json_report(tmp_path: Path) -> None:
             "--output",
             str(output_dir),
             "--signing-key-file",
-            str(key_files[0]),
+            str(key_paths[0]),
         ],
     )
     assert export.exit_code == 0
@@ -210,6 +218,78 @@ def test_evidence_keyring_verify_and_json_report(tmp_path: Path) -> None:
         app, ["evidence", "verify", str(output_dir), "--keyring-dir", str(keyring_dir)]
     )
     assert verify.exit_code == 0
+
+    report_path = tmp_path / "verify.json"
+    verify_json = runner.invoke(
+        app,
+        [
+            "evidence",
+            "verify",
+            str(output_dir),
+            "--keyring-dir",
+            str(keyring_dir),
+            "--format",
+            "json",
+            "--output",
+            str(report_path),
+        ],
+    )
+    assert verify_json.exit_code == 0
+    assert verify_json.stdout.strip() == ""
+    payload = json.loads(report_path.read_text(encoding="utf-8"))
+    assert payload["ok"] is True
+    assert payload["signature"]["present"] is True
+    assert payload["signature"]["verified"] is True
+    assert payload["signature"]["key_id"]
+    assert payload["signature"]["signed_at"]
+
+    empty_keyring = tmp_path / "keys-empty"
+    empty_keyring.mkdir(parents=True, exist_ok=True)
+    failed_verify = runner.invoke(
+        app, ["evidence", "verify", str(output_dir), "--keyring-dir", str(empty_keyring)]
+    )
+    assert failed_verify.exit_code == 1
+    assert "No key found in keyring" in failed_verify.stdout
+
+
+def test_evidence_key_revoke_marks_key_revoked_and_verify_warns(tmp_path: Path) -> None:
+    db_path = tmp_path / "fleet.db"
+    output_dir = tmp_path / "evidence-revoked"
+    keyring_dir = tmp_path / "keys"
+    keyring_dir.mkdir(parents=True, exist_ok=True)
+
+    assert runner.invoke(app, ["seed", "--db", str(db_path)]).exit_code == 0
+    assert (
+        runner.invoke(app, ["check", "--device", "mac-001", "--db", str(db_path)]).exit_code == 0
+    )
+
+    keygen = runner.invoke(app, ["evidence", "keygen", "--keyring-dir", str(keyring_dir)])
+    assert keygen.exit_code == 0
+    manifest = json.loads((keyring_dir / "keyring.json").read_text(encoding="utf-8"))
+    key_id = manifest["keys"][0]["key_id"]
+    key_path = keyring_dir / manifest["keys"][0]["filename"]
+
+    export = runner.invoke(
+        app,
+        [
+            "evidence",
+            "export",
+            "--db",
+            str(db_path),
+            "--output",
+            str(output_dir),
+            "--signing-key-file",
+            str(key_path),
+        ],
+    )
+    assert export.exit_code == 0
+
+    time.sleep(0.01)
+    revoke = runner.invoke(
+        app,
+        ["evidence", "key", "revoke", key_id, "--keyring-dir", str(keyring_dir)],
+    )
+    assert revoke.exit_code == 0
 
     verify_json = runner.invoke(
         app,
@@ -226,17 +306,67 @@ def test_evidence_keyring_verify_and_json_report(tmp_path: Path) -> None:
     assert verify_json.exit_code == 0
     payload = json.loads(verify_json.stdout)
     assert payload["ok"] is True
-    assert payload["signature"]["present"] is True
     assert payload["signature"]["verified"] is True
-    assert payload["signature"]["key_id"]
+    assert payload["signature"]["key_status"] == "revoked"
+    assert payload["signature"]["lifecycle_ok"] is True
+    assert payload["signature"]["lifecycle_warnings"]
 
-    empty_keyring = tmp_path / "keys-empty"
-    empty_keyring.mkdir(parents=True, exist_ok=True)
-    failed_verify = runner.invoke(
-        app, ["evidence", "verify", str(output_dir), "--keyring-dir", str(empty_keyring)]
+
+def test_evidence_verify_fails_if_signature_after_key_revocation(tmp_path: Path) -> None:
+    db_path = tmp_path / "fleet.db"
+    output_dir = tmp_path / "evidence-after-revoke"
+    keyring_dir = tmp_path / "keys"
+    keyring_dir.mkdir(parents=True, exist_ok=True)
+
+    assert runner.invoke(app, ["seed", "--db", str(db_path)]).exit_code == 0
+    assert (
+        runner.invoke(app, ["check", "--device", "mac-001", "--db", str(db_path)]).exit_code == 0
     )
-    assert failed_verify.exit_code == 1
-    assert "No key found in keyring" in failed_verify.stdout
+
+    keygen = runner.invoke(app, ["evidence", "keygen", "--keyring-dir", str(keyring_dir)])
+    assert keygen.exit_code == 0
+    manifest = json.loads((keyring_dir / "keyring.json").read_text(encoding="utf-8"))
+    key_id = manifest["keys"][0]["key_id"]
+    key_path = keyring_dir / manifest["keys"][0]["filename"]
+
+    revoke = runner.invoke(
+        app,
+        ["evidence", "key", "revoke", key_id, "--keyring-dir", str(keyring_dir)],
+    )
+    assert revoke.exit_code == 0
+
+    time.sleep(0.01)
+    export = runner.invoke(
+        app,
+        [
+            "evidence",
+            "export",
+            "--db",
+            str(db_path),
+            "--output",
+            str(output_dir),
+            "--signing-key-file",
+            str(key_path),
+        ],
+    )
+    assert export.exit_code == 0
+
+    verify = runner.invoke(
+        app,
+        [
+            "evidence",
+            "verify",
+            str(output_dir),
+            "--keyring-dir",
+            str(keyring_dir),
+            "--format",
+            "json",
+        ],
+    )
+    assert verify.exit_code == 1
+    payload = json.loads(verify.stdout)
+    assert payload["signature"]["verified"] is True
+    assert "after key revocation" in "\n".join(payload["errors"]).lower()
 
 
 def test_evidence_export_redact_config_applies_to_facts(tmp_path: Path) -> None:

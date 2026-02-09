@@ -98,6 +98,13 @@ OPT_KEYRING_DIR = typer.Option(
     readable=True,
     help="Directory of signing keys; selects key by signature.json key_id",
 )
+OPT_KEYRING_DIR_CREATE = typer.Option(
+    None,
+    "--keyring-dir",
+    file_okay=False,
+    dir_okay=True,
+    help="Directory of signing keys (will be created if missing)",
+)
 OPT_REDACT_CONFIG = typer.Option(
     None,
     "--redact-config",
@@ -108,6 +115,11 @@ OPT_REDACT_CONFIG = typer.Option(
 OPT_EVIDENCE_KEY_OUTPUT = typer.Option(None, "--output", help="Path to write signing key")
 OPT_FORCE = typer.Option(False, "--force", help="Overwrite output file if it exists")
 OPT_VERIFY_FORMAT = typer.Option("text", "--format", help="text/json")
+OPT_VERIFY_OUTPUT = typer.Option(
+    None,
+    "--output",
+    help="Write verification report to a file (JSON only; suppresses stdout report)",
+)
 ARG_EVIDENCE_DIR = typer.Argument(
     ...,
     exists=True,
@@ -125,11 +137,13 @@ policy_app = typer.Typer(help="Policy management")
 script_app = typer.Typer(help="Script catalog")
 schema_app = typer.Typer(help="Schema export")
 evidence_app = typer.Typer(help="Evidence export")
+evidence_key_app = typer.Typer(help="Signing key management")
 app.add_typer(inventory_app, name="inventory")
 app.add_typer(policy_app, name="policy")
 app.add_typer(script_app, name="script")
 app.add_typer(schema_app, name="schema")
 app.add_typer(evidence_app, name="evidence")
+evidence_app.add_typer(evidence_key_app, name="key")
 
 console = Console()
 
@@ -324,11 +338,70 @@ def _sign_manifest(manifest_bytes: bytes, key_bytes: bytes, generated_at: str) -
     return {
         "schema_version": 1,
         "generated_at": generated_at,
+        "signed_at": generated_at,
         "algorithm": "hmac-sha256",
         "key_id": _key_id_for_bytes(key_bytes),
         "manifest_sha256": _hash_bytes(manifest_bytes),
         "signature": signature,
     }
+
+
+def _parse_iso8601(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    # Accept both "...Z" and "...+00:00" forms.
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def _keyring_manifest_path(keyring_dir: Path) -> Path:
+    return keyring_dir / "keyring.json"
+
+
+def _load_keyring_manifest(path: Path) -> dict[str, Any]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("keyring.json must be a JSON object")
+    keys = payload.get("keys", [])
+    if not isinstance(keys, list):
+        raise ValueError("keyring.json keys must be a list")
+    normalized: list[dict[str, Any]] = []
+    for entry in keys:
+        if not isinstance(entry, dict):
+            raise ValueError("keyring.json keys entries must be objects")
+        key_id = str(entry.get("key_id", "")).strip()
+        filename = str(entry.get("filename", "")).strip()
+        if not key_id or not filename:
+            raise ValueError("keyring.json keys entries require key_id and filename")
+        normalized.append(
+            {
+                "key_id": key_id,
+                "filename": filename,
+                "status": str(entry.get("status", "active")).strip().lower() or "active",
+                "created_at": entry.get("created_at"),
+                "activated_at": entry.get("activated_at"),
+                "revoked_at": entry.get("revoked_at"),
+            }
+        )
+    payload["schema_version"] = int(payload.get("schema_version", 1) or 1)
+    payload["keys"] = sorted(normalized, key=lambda item: str(item.get("key_id", "")))
+    return payload
+
+
+def _save_keyring_manifest(path: Path, payload: dict[str, Any]) -> None:
+    payload = dict(payload)
+    payload.setdefault("schema_version", 1)
+    keys = payload.get("keys", [])
+    if isinstance(keys, list):
+        payload["keys"] = sorted(keys, key=lambda item: str(item.get("key_id", "")))
+    path.write_text(_json_payload_text(payload), encoding="utf-8")
 
 
 def _load_redact_config(path: Path) -> dict[str, Any]:
@@ -998,10 +1071,134 @@ def drift(
     console.print(table)
 
 
+@evidence_key_app.command("list")
+def evidence_key_list(
+    keyring_dir: Path = OPT_KEYRING_DIR,
+    format: str = typer.Option("table", "--format", help="table/json"),
+) -> None:
+    """List signing keys in a keyring (using keyring.json when present)."""
+    normalized_format = format.strip().lower()
+    if normalized_format not in {"table", "json"}:
+        console.print(f"[red]Unknown format: {format}[/red]")
+        raise typer.Exit(code=2)
+
+    manifest_path = _keyring_manifest_path(keyring_dir)
+    warnings: list[str] = []
+    keys: list[dict[str, Any]] = []
+
+    if manifest_path.exists():
+        try:
+            manifest = _load_keyring_manifest(manifest_path)
+        except (OSError, ValueError) as exc:
+            console.print(f"[red]Invalid keyring manifest: {exc}[/red]")
+            raise typer.Exit(code=1) from exc
+        for entry in manifest.get("keys", []):
+            if not isinstance(entry, dict):
+                continue
+            keys.append(dict(entry))
+    else:
+        warnings.append("keyring.json not found; listing keys by scanning directory")
+        for candidate in sorted(keyring_dir.iterdir()):
+            if not candidate.is_file():
+                continue
+            try:
+                if candidate.stat().st_size > 64 * 1024:
+                    continue
+                candidate_bytes = candidate.read_bytes()
+            except OSError:
+                continue
+            keys.append(
+                {
+                    "key_id": _key_id_for_bytes(candidate_bytes),
+                    "filename": candidate.name,
+                    "status": "unknown",
+                    "created_at": None,
+                    "activated_at": None,
+                    "revoked_at": None,
+                }
+            )
+
+    if normalized_format == "json":
+        payload = {
+            "schema_version": 1,
+            "keyring_dir": str(keyring_dir),
+            "warnings": warnings,
+            "keys": sorted(keys, key=lambda item: str(item.get("key_id", ""))),
+        }
+        typer.echo(_json_payload_text(payload), nl=False)
+        return
+
+    table = Table(title=f"Signing Keys ({keyring_dir})")
+    table.add_column("Key ID")
+    table.add_column("Status")
+    table.add_column("Filename")
+    table.add_column("Activated")
+    table.add_column("Revoked")
+    if not keys:
+        table.add_row("(none)", "", "", "", "")
+    else:
+        for entry in sorted(keys, key=lambda item: str(item.get("key_id", ""))):
+            table.add_row(
+                str(entry.get("key_id", "")),
+                str(entry.get("status", "")),
+                str(entry.get("filename", "")),
+                str(entry.get("activated_at") or ""),
+                str(entry.get("revoked_at") or ""),
+            )
+    console.print(table)
+    for warning in warnings:
+        console.print(f"[yellow]{warning}[/yellow]")
+
+
+@evidence_key_app.command("revoke")
+def evidence_key_revoke(
+    key_id: str = typer.Argument(..., help="Key ID to revoke"),
+    keyring_dir: Path = OPT_KEYRING_DIR,
+) -> None:
+    """Mark a signing key as revoked in keyring.json (does not delete key material)."""
+    desired = key_id.strip()
+    if not desired:
+        console.print("[red]key_id cannot be empty[/red]")
+        raise typer.Exit(code=2)
+
+    manifest_path = _keyring_manifest_path(keyring_dir)
+    if not manifest_path.exists():
+        console.print("[red]keyring.json not found; cannot revoke without a manifest[/red]")
+        raise typer.Exit(code=1)
+
+    try:
+        manifest = _load_keyring_manifest(manifest_path)
+    except (OSError, ValueError) as exc:
+        console.print(f"[red]Invalid keyring manifest: {exc}[/red]")
+        raise typer.Exit(code=1) from exc
+
+    now = datetime.now(timezone.utc).isoformat()
+    found = False
+    updated: list[dict[str, Any]] = []
+    for entry in manifest.get("keys", []):
+        if not isinstance(entry, dict):
+            continue
+        row = dict(entry)
+        if str(row.get("key_id", "")).strip() == desired:
+            found = True
+            row["status"] = "revoked"
+            row["revoked_at"] = now
+        updated.append(row)
+
+    if not found:
+        console.print(f"[red]No key found in manifest for key_id={desired}[/red]")
+        raise typer.Exit(code=1)
+
+    manifest["keys"] = updated
+    manifest["updated_at"] = now
+    _save_keyring_manifest(manifest_path, manifest)
+    console.print(f"Revoked key {desired} in {manifest_path}")
+
+
 @evidence_app.command("keygen")
 def evidence_keygen(
     output: Path | None = OPT_EVIDENCE_KEY_OUTPUT,
-    keyring_dir: Path | None = OPT_KEYRING_DIR,
+    keyring_dir: Path | None = OPT_KEYRING_DIR_CREATE,
     force: bool = OPT_FORCE,
 ) -> None:
     """Generate a new HMAC signing key for evidence manifests."""
@@ -1029,6 +1226,36 @@ def evidence_keygen(
     output_path.write_bytes(encoded_bytes)
     with contextlib.suppress(OSError):
         os.chmod(output_path, 0o600)
+
+    if keyring_dir:
+        now = datetime.now(timezone.utc).isoformat()
+        manifest_path = _keyring_manifest_path(keyring_dir)
+        if manifest_path.exists():
+            try:
+                manifest = _load_keyring_manifest(manifest_path)
+            except (OSError, ValueError) as exc:
+                console.print(f"[red]Invalid keyring manifest: {exc}[/red]")
+                raise typer.Exit(code=1) from exc
+        else:
+            manifest = {"schema_version": 1, "created_at": now, "keys": []}
+
+        if any(str(item.get("key_id", "")).strip() == key_id for item in manifest.get("keys", [])):
+            console.print(f"[red]key_id already present in keyring manifest: {key_id}[/red]")
+            raise typer.Exit(code=1)
+
+        manifest.setdefault("keys", [])
+        manifest["keys"] = list(manifest["keys"]) + [
+            {
+                "key_id": key_id,
+                "filename": output_path.name,
+                "status": "active",
+                "created_at": now,
+                "activated_at": now,
+                "revoked_at": None,
+            }
+        ]
+        manifest["updated_at"] = now
+        _save_keyring_manifest(manifest_path, manifest)
 
     console.print(f"Wrote signing key to {output_path} (key_id={key_id})")
 
@@ -1169,6 +1396,7 @@ def evidence_verify(
     signing_key_file: Path | None = OPT_SIGNING_KEY_FILE,
     keyring_dir: Path | None = OPT_KEYRING_DIR,
     format: str = OPT_VERIFY_FORMAT,
+    output: Path | None = OPT_VERIFY_OUTPUT,
 ) -> None:
     """Verify evidence bundle integrity and optional signature."""
     normalized_format = format.strip().lower()
@@ -1176,11 +1404,16 @@ def evidence_verify(
         console.print(f"[red]Unknown format: {format}[/red]")
         raise typer.Exit(code=2)
 
+    if output and normalized_format != "json":
+        console.print("[red]--output is only supported with --format json[/red]")
+        raise typer.Exit(code=2)
+
     if signing_key_file and keyring_dir:
         console.print("[red]Provide only one of --signing-key-file or --keyring-dir[/red]")
         raise typer.Exit(code=2)
 
     errors: list[str] = []
+    warnings: list[str] = []
     artifact_results: list[dict[str, Any]] = []
     bundle_hash_expected: str | None = None
     bundle_hash_actual: str | None = None
@@ -1195,6 +1428,14 @@ def evidence_verify(
     manifest_sha_expected: str | None = None
     manifest_sha_actual: str | None = None
     manifest_sha_match: bool | None = None
+    signature_signed_at: str | None = None
+    signature_key_status: str | None = None
+    signature_key_created_at: str | None = None
+    signature_key_activated_at: str | None = None
+    signature_key_revoked_at: str | None = None
+    signature_lifecycle_ok: bool | None = None
+    signature_lifecycle_errors: list[str] = []
+    signature_lifecycle_warnings: list[str] = []
 
     manifest_path = bundle_dir / "manifest.json"
     manifest_bytes: bytes | None = None
@@ -1298,6 +1539,11 @@ def evidence_verify(
 
                 signature = str(signature_payload.get("signature", ""))
                 signature_key_id = str(signature_payload.get("key_id", "")) or None
+                signed_at_value = signature_payload.get("signed_at") or signature_payload.get(
+                    "generated_at"
+                )
+                if isinstance(signed_at_value, str) and signed_at_value.strip():
+                    signature_signed_at = signed_at_value.strip()
                 manifest_sha_expected = str(signature_payload.get("manifest_sha256", "")) or None
                 manifest_sha_actual = _hash_bytes(manifest_bytes)
                 if manifest_sha_expected:
@@ -1308,6 +1554,7 @@ def evidence_verify(
                         errors.append("Manifest SHA256 mismatch")
 
                 selected_key_bytes: bytes | None = None
+                key_entry: dict[str, Any] | None = None
                 if signing_key_file:
                     selected_key_bytes = signing_key_file.read_bytes()
                     signature_key_path = str(signing_key_file)
@@ -1320,34 +1567,132 @@ def evidence_verify(
                     elif keyring_dir is None:
                         errors.append("Internal error: --keyring-dir missing")
                     else:
-                        matches: list[Path] = []
-                        for candidate in sorted(keyring_dir.iterdir()):
-                            if not candidate.is_file():
-                                continue
+                        manifest_path = _keyring_manifest_path(keyring_dir)
+                        if manifest_path.exists():
                             try:
-                                if candidate.stat().st_size > 64 * 1024:
-                                    continue
-                            except OSError:
-                                continue
-                            try:
-                                candidate_bytes = candidate.read_bytes()
-                            except OSError:
-                                continue
-                            if _key_id_for_bytes(candidate_bytes) == desired:
-                                matches.append(candidate)
-                        if not matches:
-                            errors.append(f"No key found in keyring for key_id={desired}")
-                        elif len(matches) > 1:
-                            errors.append(f"Multiple keys matched in keyring for key_id={desired}")
+                                manifest = _load_keyring_manifest(manifest_path)
+                            except (OSError, ValueError) as exc:
+                                errors.append(f"Invalid keyring manifest: {exc}")
+                            else:
+                                manifest_matches = [
+                                    entry
+                                    for entry in manifest.get("keys", [])
+                                    if isinstance(entry, dict)
+                                    and str(entry.get("key_id", "")).strip() == desired
+                                ]
+                                if not manifest_matches:
+                                    errors.append(f"No key found in keyring for key_id={desired}")
+                                elif len(manifest_matches) > 1:
+                                    errors.append(
+                                        f"Multiple keys matched in keyring for key_id={desired}"
+                                    )
+                                else:
+                                    key_entry = dict(manifest_matches[0])
+                                    filename = str(key_entry.get("filename", "")).strip()
+                                    selected = keyring_dir / filename
+                                    if not filename or not selected.exists():
+                                        errors.append(
+                                            "Key entry in manifest missing file "
+                                            f"for key_id={desired}"
+                                        )
+                                    else:
+                                        selected_key_bytes = selected.read_bytes()
+                                        signature_key_path = str(selected)
                         else:
-                            selected = matches[0]
-                            selected_key_bytes = selected.read_bytes()
-                            signature_key_path = str(selected)
+                            warnings.append(
+                                "keyring.json not found; selecting key by scanning directory"
+                            )
+                            file_matches: list[Path] = []
+                            for candidate in sorted(keyring_dir.iterdir()):
+                                if not candidate.is_file():
+                                    continue
+                                try:
+                                    if candidate.stat().st_size > 64 * 1024:
+                                        continue
+                                except OSError:
+                                    continue
+                                try:
+                                    candidate_bytes = candidate.read_bytes()
+                                except OSError:
+                                    continue
+                                if _key_id_for_bytes(candidate_bytes) == desired:
+                                    file_matches.append(candidate)
+                            if not file_matches:
+                                errors.append(f"No key found in keyring for key_id={desired}")
+                            elif len(file_matches) > 1:
+                                errors.append(
+                                    f"Multiple keys matched in keyring for key_id={desired}"
+                                )
+                            else:
+                                selected = file_matches[0]
+                                selected_key_bytes = selected.read_bytes()
+                                signature_key_path = str(selected)
 
                 if selected_key_bytes is not None:
                     actual_key_id = _key_id_for_bytes(selected_key_bytes)
                     if signature_key_id and actual_key_id != signature_key_id:
                         errors.append("Signing key_id mismatch")
+
+                    # Key lifecycle: validate signature time vs activation/revocation.
+                    if key_entry:
+                        signature_key_status = str(key_entry.get("status") or "").strip() or None
+                        signature_key_created_at = (
+                            str(key_entry.get("created_at")).strip()
+                            if key_entry.get("created_at")
+                            else None
+                        )
+                        signature_key_activated_at = (
+                            str(key_entry.get("activated_at")).strip()
+                            if key_entry.get("activated_at")
+                            else None
+                        )
+                        signature_key_revoked_at = (
+                            str(key_entry.get("revoked_at")).strip()
+                            if key_entry.get("revoked_at")
+                            else None
+                        )
+
+                        signed_at_dt = _parse_iso8601(signature_signed_at)
+                        activated_dt = _parse_iso8601(signature_key_activated_at)
+                        revoked_dt = _parse_iso8601(signature_key_revoked_at)
+                        if signature_signed_at and signed_at_dt is None:
+                            signature_lifecycle_warnings.append(
+                                f"Unparseable signature signed_at timestamp: {signature_signed_at}"
+                            )
+                        if signature_key_activated_at and activated_dt is None:
+                            signature_lifecycle_warnings.append(
+                                "Unparseable key activated_at timestamp: "
+                                f"{signature_key_activated_at}"
+                            )
+                        if signature_key_revoked_at and revoked_dt is None:
+                            signature_lifecycle_warnings.append(
+                                "Unparseable key revoked_at timestamp: "
+                                f"{signature_key_revoked_at}"
+                            )
+
+                        if signed_at_dt and activated_dt and signed_at_dt < activated_dt:
+                            signature_lifecycle_errors.append(
+                                "Signature timestamp predates key activation"
+                            )
+                        if signed_at_dt and revoked_dt:
+                            if signed_at_dt > revoked_dt:
+                                signature_lifecycle_errors.append(
+                                    "Signature timestamp is after key revocation"
+                                )
+                            else:
+                                signature_lifecycle_warnings.append(
+                                    f"Key was revoked at {signature_key_revoked_at} "
+                                    f"(signature signed at {signature_signed_at})"
+                                )
+                        elif signature_key_status == "revoked" and not signature_key_revoked_at:
+                            signature_lifecycle_warnings.append(
+                                "Key status is revoked but revoked_at is missing"
+                            )
+
+                        signature_lifecycle_ok = len(signature_lifecycle_errors) == 0
+                        for item in signature_lifecycle_errors:
+                            errors.append(item)
+                        warnings.extend(signature_lifecycle_warnings)
 
                     expected_sig = hmac.new(
                         selected_key_bytes,
@@ -1365,6 +1710,7 @@ def evidence_verify(
         "bundle_dir": str(bundle_dir),
         "ok": len(errors) == 0,
         "errors": errors,
+        "warnings": warnings,
         "artifacts": artifact_results,
         "bundle_fingerprint": {
             "expected_sha256": bundle_hash_expected,
@@ -1377,6 +1723,14 @@ def evidence_verify(
             "algorithm": signature_algorithm,
             "key_id": signature_key_id,
             "key_path": signature_key_path,
+            "signed_at": signature_signed_at,
+            "key_status": signature_key_status,
+            "key_created_at": signature_key_created_at,
+            "key_activated_at": signature_key_activated_at,
+            "key_revoked_at": signature_key_revoked_at,
+            "lifecycle_ok": signature_lifecycle_ok,
+            "lifecycle_errors": signature_lifecycle_errors,
+            "lifecycle_warnings": signature_lifecycle_warnings,
             "manifest_sha256_expected": manifest_sha_expected,
             "manifest_sha256_actual": manifest_sha_actual,
             "manifest_sha256_match": manifest_sha_match,
@@ -1384,8 +1738,11 @@ def evidence_verify(
     }
 
     if normalized_format == "json":
-        # Avoid rich wrapping inserting newlines inside long string values.
-        typer.echo(_json_payload_text(report), nl=False)
+        if output:
+            output.write_text(_json_payload_text(report), encoding="utf-8")
+        else:
+            # Avoid rich wrapping inserting newlines inside long string values.
+            typer.echo(_json_payload_text(report), nl=False)
         if errors:
             raise typer.Exit(code=1)
         return
