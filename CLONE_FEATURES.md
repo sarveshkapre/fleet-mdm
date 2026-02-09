@@ -7,9 +7,11 @@
 - Gaps found during codebase exploration
 
 ## Candidate Features To Do
-- [ ] P1 - Add key rotation and key-ID management workflow for evidence manifest signing.
-- [ ] P2 - Add policy-level redaction controls for evidence exports (allowlist/denylist for sensitive facts fields).
-- [ ] P2 - Add detached verification report output (`verify --format json`) for audit pipeline ingestion.
+- [ ] P0 - Track repo-wide `AGENTS.md` contract (currently untracked) and keep it aligned with `docs/AGENTS.md`.
+- [ ] P1 - Add key rotation and key-ID management workflow for evidence manifest signing (keygen + keyring verify).
+- [ ] P1 - Add detached verification report output (`fleetmdm evidence verify --format json`) for audit pipeline ingestion.
+- [ ] P2 - Add evidence export redaction config for sensitive inventory facts fields (allowlist/denylist of dot-paths).
+- [ ] P3 - Update `docs/PROJECT.md` “Next 3 improvements” to reflect current roadmap (evidence key lifecycle + verify reports + redaction controls).
 
 ## Implemented
 - [x] 2026-02-09 - CI/tooling parity fix: `Makefile` now falls back to `python3` when `.venv` is absent and CI uses `make setup`. Evidence: `Makefile`, `.github/workflows/ci.yml`.
