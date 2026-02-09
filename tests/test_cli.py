@@ -173,3 +173,117 @@ def test_evidence_verify_requires_signature_when_key_provided(tmp_path: Path) ->
     )
     assert verify.exit_code == 1
     assert "signature.json not found" in verify.stdout
+
+
+def test_evidence_keyring_verify_and_json_report(tmp_path: Path) -> None:
+    db_path = tmp_path / "fleet.db"
+    output_dir = tmp_path / "evidence-keyring"
+    keyring_dir = tmp_path / "keys"
+    keyring_dir.mkdir(parents=True, exist_ok=True)
+
+    assert runner.invoke(app, ["seed", "--db", str(db_path)]).exit_code == 0
+    assert (
+        runner.invoke(app, ["check", "--device", "mac-001", "--db", str(db_path)]).exit_code == 0
+    )
+
+    keygen = runner.invoke(app, ["evidence", "keygen", "--keyring-dir", str(keyring_dir)])
+    assert keygen.exit_code == 0
+    key_files = sorted([p for p in keyring_dir.iterdir() if p.is_file()])
+    assert len(key_files) == 1
+
+    export = runner.invoke(
+        app,
+        [
+            "evidence",
+            "export",
+            "--db",
+            str(db_path),
+            "--output",
+            str(output_dir),
+            "--signing-key-file",
+            str(key_files[0]),
+        ],
+    )
+    assert export.exit_code == 0
+
+    verify = runner.invoke(
+        app, ["evidence", "verify", str(output_dir), "--keyring-dir", str(keyring_dir)]
+    )
+    assert verify.exit_code == 0
+
+    verify_json = runner.invoke(
+        app,
+        [
+            "evidence",
+            "verify",
+            str(output_dir),
+            "--keyring-dir",
+            str(keyring_dir),
+            "--format",
+            "json",
+        ],
+    )
+    assert verify_json.exit_code == 0
+    payload = json.loads(verify_json.stdout)
+    assert payload["ok"] is True
+    assert payload["signature"]["present"] is True
+    assert payload["signature"]["verified"] is True
+    assert payload["signature"]["key_id"]
+
+    empty_keyring = tmp_path / "keys-empty"
+    empty_keyring.mkdir(parents=True, exist_ok=True)
+    failed_verify = runner.invoke(
+        app, ["evidence", "verify", str(output_dir), "--keyring-dir", str(empty_keyring)]
+    )
+    assert failed_verify.exit_code == 1
+    assert "No key found in keyring" in failed_verify.stdout
+
+
+def test_evidence_export_redact_config_applies_to_facts(tmp_path: Path) -> None:
+    db_path = tmp_path / "fleet.db"
+    output_dir = tmp_path / "evidence-redact-config"
+    config_path = tmp_path / "redact.yml"
+
+    config_path.write_text(
+        "\n".join(
+            [
+                "facts_allowlist:",
+                "  - disk.encrypted",
+                "  - cpu.cores",
+                "facts_denylist:",
+                "  - cpu.cores",
+                "replacement: \"[REDACTED]\"",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    assert runner.invoke(app, ["seed", "--db", str(db_path)]).exit_code == 0
+    assert (
+        runner.invoke(app, ["check", "--device", "mac-001", "--db", str(db_path)]).exit_code == 0
+    )
+
+    export = runner.invoke(
+        app,
+        [
+            "evidence",
+            "export",
+            "--db",
+            str(db_path),
+            "--output",
+            str(output_dir),
+            "--redact-config",
+            str(config_path),
+        ],
+    )
+    assert export.exit_code == 0
+
+    metadata = json.loads((output_dir / "metadata.json").read_text(encoding="utf-8"))
+    inventory = json.loads((output_dir / "inventory.json").read_text(encoding="utf-8"))
+    assert metadata["facts_redaction"]["facts_allowlist"] == ["cpu.cores", "disk.encrypted"]
+    assert metadata["facts_redaction"]["facts_denylist"] == ["cpu.cores"]
+
+    mac = next(item for item in inventory if item["device_id"] == "mac-001")
+    assert mac["facts"]["disk"]["encrypted"] is True
+    assert mac["facts"]["cpu"]["cores"] == "[REDACTED]"

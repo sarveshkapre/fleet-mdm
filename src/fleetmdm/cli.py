@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import base64
+import contextlib
 import hashlib
 import hmac
 import json
+import os
+import secrets
 import sqlite3
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
@@ -11,6 +15,7 @@ from textwrap import dedent
 from typing import Any
 
 import typer
+import yaml
 from pydantic import ValidationError
 from rich.console import Console
 from rich.table import Table
@@ -84,6 +89,25 @@ OPT_SIGNING_KEY_FILE = typer.Option(
     readable=True,
     help="Path to key file used to HMAC-sign evidence manifests",
 )
+OPT_KEYRING_DIR = typer.Option(
+    None,
+    "--keyring-dir",
+    exists=True,
+    file_okay=False,
+    dir_okay=True,
+    readable=True,
+    help="Directory of signing keys; selects key by signature.json key_id",
+)
+OPT_REDACT_CONFIG = typer.Option(
+    None,
+    "--redact-config",
+    exists=True,
+    readable=True,
+    help="YAML/JSON file with additional redactions for evidence inventory facts",
+)
+OPT_EVIDENCE_KEY_OUTPUT = typer.Option(None, "--output", help="Path to write signing key")
+OPT_FORCE = typer.Option(False, "--force", help="Overwrite output file if it exists")
+OPT_VERIFY_FORMAT = typer.Option("text", "--format", help="text/json")
 ARG_EVIDENCE_DIR = typer.Argument(
     ...,
     exists=True,
@@ -196,6 +220,10 @@ def _hash_bytes(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+def _key_id_for_bytes(key_bytes: bytes) -> str:
+    return _hash_bytes(key_bytes)[:16]
+
+
 def _normalize_redaction_profile(profile: str) -> str:
     normalized = profile.strip().lower()
     if normalized not in ALLOWED_REDACTION_PROFILES:
@@ -297,10 +325,107 @@ def _sign_manifest(manifest_bytes: bytes, key_bytes: bytes, generated_at: str) -
         "schema_version": 1,
         "generated_at": generated_at,
         "algorithm": "hmac-sha256",
-        "key_id": _hash_bytes(key_bytes)[:16],
+        "key_id": _key_id_for_bytes(key_bytes),
         "manifest_sha256": _hash_bytes(manifest_bytes),
         "signature": signature,
     }
+
+
+def _load_redact_config(path: Path) -> dict[str, Any]:
+    raw_bytes = path.read_bytes()
+    text = raw_bytes.decode("utf-8")
+    try:
+        payload: Any = json.loads(text)
+    except ValueError:
+        payload = yaml.safe_load(text)
+
+    if not isinstance(payload, dict):
+        raise ValueError("redact config must be a YAML/JSON object")
+
+    allowlist = payload.get("facts_allowlist", [])
+    denylist = payload.get("facts_denylist", [])
+    replacement = payload.get("replacement", "[REDACTED]")
+
+    if allowlist is not None and not isinstance(allowlist, list):
+        raise ValueError("facts_allowlist must be a list of dot-path strings")
+    if denylist is not None and not isinstance(denylist, list):
+        raise ValueError("facts_denylist must be a list of dot-path strings")
+    if not isinstance(replacement, str):
+        raise ValueError("replacement must be a string")
+
+    def normalize_paths(value: Any) -> list[str]:
+        paths: list[str] = []
+        if not value:
+            return paths
+        for item in value:
+            path = str(item).strip()
+            if not path or path.startswith(".") or path.endswith(".") or ".." in path:
+                raise ValueError(f"Invalid dot-path: {item!r}")
+            paths.append(path)
+        return paths
+
+    return {
+        "facts_allowlist": normalize_paths(allowlist),
+        "facts_denylist": normalize_paths(denylist),
+        "replacement": replacement,
+        "config_sha256": _hash_bytes(raw_bytes),
+    }
+
+
+def _get_dot_path(source: Any, dot_path: str) -> tuple[bool, Any]:
+    current: Any = source
+    for part in dot_path.split("."):
+        if not isinstance(current, dict) or part not in current:
+            return False, None
+        current = current[part]
+    return True, current
+
+
+def _set_dot_path(target: dict[str, Any], dot_path: str, value: Any) -> None:
+    parts = dot_path.split(".")
+    current: dict[str, Any] = target
+    for part in parts[:-1]:
+        next_value = current.get(part)
+        if not isinstance(next_value, dict):
+            next_value = {}
+            current[part] = next_value
+        current = next_value
+    current[parts[-1]] = value
+
+
+def _redact_inventory_facts(
+    inventory: Sequence[dict[str, Any]], redact_config: dict[str, Any] | None
+) -> list[dict[str, Any]]:
+    if not redact_config:
+        return [dict(row) for row in inventory]
+
+    allowlist = list(redact_config.get("facts_allowlist", []))
+    denylist = list(redact_config.get("facts_denylist", []))
+    replacement = redact_config.get("replacement", "[REDACTED]")
+
+    redacted: list[dict[str, Any]] = []
+    for record in inventory:
+        row = dict(record)
+        facts = row.get("facts")
+        if not isinstance(facts, dict):
+            facts = {}
+
+        if allowlist:
+            filtered: dict[str, Any] = {}
+            for path in allowlist:
+                found, value = _get_dot_path(facts, path)
+                if found:
+                    _set_dot_path(filtered, path, value)
+            facts = filtered
+
+        for path in denylist:
+            found, _value = _get_dot_path(facts, path)
+            if found:
+                _set_dot_path(facts, path, replacement)
+
+        row["facts"] = facts
+        redacted.append(row)
+    return redacted
 
 
 @inventory_app.command("validate")
@@ -873,10 +998,46 @@ def drift(
     console.print(table)
 
 
+@evidence_app.command("keygen")
+def evidence_keygen(
+    output: Path | None = OPT_EVIDENCE_KEY_OUTPUT,
+    keyring_dir: Path | None = OPT_KEYRING_DIR,
+    force: bool = OPT_FORCE,
+) -> None:
+    """Generate a new HMAC signing key for evidence manifests."""
+    if output and keyring_dir:
+        console.print("[red]Provide only one of --output or --keyring-dir[/red]")
+        raise typer.Exit(code=2)
+
+    key_bytes = secrets.token_bytes(32)
+    encoded = base64.urlsafe_b64encode(key_bytes).decode("ascii").rstrip("=")
+    encoded_bytes = f"{encoded}\n".encode("ascii")
+    key_id = _key_id_for_bytes(encoded_bytes)
+
+    if keyring_dir:
+        keyring_dir.mkdir(parents=True, exist_ok=True)
+        output_path = keyring_dir / f"fleetmdm-signing-{key_id}.key"
+    elif output:
+        output_path = output
+    else:
+        output_path = Path(f"fleetmdm-signing-{key_id}.key")
+
+    if output_path.exists() and not force:
+        console.print("[red]Refusing to overwrite existing key file (use --force)[/red]")
+        raise typer.Exit(code=2)
+
+    output_path.write_bytes(encoded_bytes)
+    with contextlib.suppress(OSError):
+        os.chmod(output_path, 0o600)
+
+    console.print(f"Wrote signing key to {output_path} (key_id={key_id})")
+
+
 @evidence_app.command("export")
 def evidence_export(
     output: Path | None = OPT_EVIDENCE_OUTPUT,
     redaction_profile: str = OPT_REDACT_PROFILE,
+    redact_config: Path | None = OPT_REDACT_CONFIG,
     signing_key_file: Path | None = OPT_SIGNING_KEY_FILE,
     db: str | None = OPT_DB,
 ) -> None:
@@ -886,6 +1047,14 @@ def evidence_export(
     except ValueError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=2) from exc
+
+    facts_redaction: dict[str, Any] | None = None
+    if redact_config:
+        try:
+            facts_redaction = _load_redact_config(redact_config)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(code=2) from exc
 
     db_path = resolve_db_path(db)
     init_db(db_path)
@@ -946,12 +1115,23 @@ def evidence_export(
         latest_run,
         drift_changes,
     )
+    redacted_inventory = _redact_inventory_facts(redacted_inventory, facts_redaction)
 
     total_artifacts = 7 + (1 if signing_key_file else 0)
     metadata = {
         "generated_at": generated_at,
         "db_path": str(db_path),
         "redaction_profile": profile,
+        "facts_redaction": (
+            None
+            if not facts_redaction
+            else {
+                "facts_allowlist": sorted(facts_redaction["facts_allowlist"]),
+                "facts_denylist": sorted(facts_redaction["facts_denylist"]),
+                "replacement": facts_redaction["replacement"],
+                "config_sha256": facts_redaction["config_sha256"],
+            }
+        ),
         "schema_version": 1,
         "artifact_count": total_artifacts,
     }
@@ -987,86 +1167,235 @@ def evidence_export(
 def evidence_verify(
     bundle_dir: Path = ARG_EVIDENCE_DIR,
     signing_key_file: Path | None = OPT_SIGNING_KEY_FILE,
+    keyring_dir: Path | None = OPT_KEYRING_DIR,
+    format: str = OPT_VERIFY_FORMAT,
 ) -> None:
     """Verify evidence bundle integrity and optional signature."""
-    manifest_path = bundle_dir / "manifest.json"
-    if not manifest_path.exists():
-        console.print("[red]manifest.json not found in evidence directory[/red]")
-        raise typer.Exit(code=1)
+    normalized_format = format.strip().lower()
+    if normalized_format not in {"text", "json"}:
+        console.print(f"[red]Unknown format: {format}[/red]")
+        raise typer.Exit(code=2)
 
-    try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except ValueError as exc:
-        console.print(f"[red]Invalid manifest.json: {exc}[/red]")
-        raise typer.Exit(code=1) from exc
-
-    entries = manifest.get("artifacts")
-    if not isinstance(entries, list):
-        console.print("[red]manifest.json is missing a valid artifacts list[/red]")
-        raise typer.Exit(code=1)
+    if signing_key_file and keyring_dir:
+        console.print("[red]Provide only one of --signing-key-file or --keyring-dir[/red]")
+        raise typer.Exit(code=2)
 
     errors: list[str] = []
-    normalized_entries: list[dict[str, str]] = []
-    for entry in entries:
-        if not isinstance(entry, dict):
-            errors.append("Invalid manifest entry format")
-            continue
-        name = str(entry.get("name", ""))
-        expected_sha = str(entry.get("sha256", ""))
-        expected_size = entry.get("size_bytes")
-        if not name or not expected_sha:
-            errors.append("Manifest entry missing name or sha256")
-            continue
-        normalized_entries.append({"name": name, "sha256": expected_sha})
-
-        artifact_path = bundle_dir / name
-        if not artifact_path.exists():
-            errors.append(f"Missing artifact: {name}")
-            continue
-        actual_bytes = artifact_path.read_bytes()
-        actual_sha = _hash_bytes(actual_bytes)
-        if actual_sha != expected_sha:
-            errors.append(f"Checksum mismatch: {name}")
-        if isinstance(expected_size, int) and expected_size != len(actual_bytes):
-            errors.append(f"Size mismatch: {name}")
-
-    sorted_entries = sorted(normalized_entries, key=lambda item: item["name"])
-    bundle_material = "\n".join(f"{entry['name']}:{entry['sha256']}" for entry in sorted_entries)
-    expected_bundle_hash = manifest.get("bundle_sha256")
-    if isinstance(expected_bundle_hash, str) and expected_bundle_hash:
-        actual_bundle_hash = sha256_text(bundle_material)
-        if not hmac.compare_digest(actual_bundle_hash, expected_bundle_hash):
-            errors.append("Bundle fingerprint mismatch")
+    artifact_results: list[dict[str, Any]] = []
+    bundle_hash_expected: str | None = None
+    bundle_hash_actual: str | None = None
+    bundle_hash_match: bool | None = None
 
     signature_path = bundle_dir / "signature.json"
-    if signing_key_file:
-        if not signature_path.exists():
-            errors.append("signature.json not found, but --signing-key-file was provided")
+    signature_present = signature_path.exists()
+    signature_verified: bool | None = None
+    signature_key_id: str | None = None
+    signature_key_path: str | None = None
+    signature_algorithm: str | None = None
+    manifest_sha_expected: str | None = None
+    manifest_sha_actual: str | None = None
+    manifest_sha_match: bool | None = None
+
+    manifest_path = bundle_dir / "manifest.json"
+    manifest_bytes: bytes | None = None
+    manifest: dict[str, Any] | None = None
+
+    if not manifest_path.exists():
+        errors.append("manifest.json not found in evidence directory")
+    else:
+        try:
+            manifest_bytes = manifest_path.read_bytes()
+            manifest = json.loads(manifest_bytes.decode("utf-8"))
+        except ValueError as exc:
+            errors.append(f"Invalid manifest.json: {exc}")
+
+    entries = None if not manifest else manifest.get("artifacts")
+    if manifest and not isinstance(entries, list):
+        errors.append("manifest.json is missing a valid artifacts list")
+        entries = []
+
+    normalized_entries: list[dict[str, str]] = []
+    if isinstance(entries, list):
+        for entry in entries:
+            if not isinstance(entry, dict):
+                errors.append("Invalid manifest entry format")
+                continue
+            name = str(entry.get("name", ""))
+            expected_sha = str(entry.get("sha256", ""))
+            expected_size = entry.get("size_bytes")
+            if not name or not expected_sha:
+                errors.append("Manifest entry missing name or sha256")
+                continue
+
+            artifact_path = bundle_dir / name
+            record: dict[str, Any] = {
+                "name": name,
+                "expected_sha256": expected_sha,
+                "expected_size_bytes": expected_size if isinstance(expected_size, int) else None,
+                "present": artifact_path.exists(),
+                "actual_sha256": None,
+                "actual_size_bytes": None,
+                "checksum_match": None,
+                "size_match": None,
+                "ok": False,
+            }
+            if not artifact_path.exists():
+                errors.append(f"Missing artifact: {name}")
+                artifact_results.append(record)
+                continue
+
+            actual_bytes = artifact_path.read_bytes()
+            actual_sha = _hash_bytes(actual_bytes)
+            record["actual_sha256"] = actual_sha
+            record["actual_size_bytes"] = len(actual_bytes)
+            record["checksum_match"] = actual_sha == expected_sha
+            record["size_match"] = (
+                None
+                if not isinstance(expected_size, int)
+                else bool(expected_size == len(actual_bytes))
+            )
+            if actual_sha != expected_sha:
+                errors.append(f"Checksum mismatch: {name}")
+            if isinstance(expected_size, int) and expected_size != len(actual_bytes):
+                errors.append(f"Size mismatch: {name}")
+            record["ok"] = bool(
+                record["checksum_match"]
+                and (record["size_match"] is None or record["size_match"] is True)
+            )
+            artifact_results.append(record)
+            normalized_entries.append({"name": name, "sha256": expected_sha})
+
+    expected_bundle_hash = None if not manifest else manifest.get("bundle_sha256")
+    if isinstance(expected_bundle_hash, str) and expected_bundle_hash and normalized_entries:
+        sorted_entries = sorted(normalized_entries, key=lambda item: item["name"])
+        bundle_material = "\n".join(
+            f"{entry['name']}:{entry['sha256']}" for entry in sorted_entries
+        )
+        bundle_hash_expected = expected_bundle_hash
+        bundle_hash_actual = sha256_text(bundle_material)
+        bundle_hash_match = hmac.compare_digest(bundle_hash_actual, bundle_hash_expected)
+        if not bundle_hash_match:
+            errors.append("Bundle fingerprint mismatch")
+
+    if signing_key_file or keyring_dir:
+        if not signature_present:
+            errors.append(
+                "signature.json not found, but --signing-key-file was provided"
+                if signing_key_file
+                else "signature.json not found, but --keyring-dir was provided"
+            )
+        elif manifest_bytes is None:
+            errors.append("manifest.json missing; cannot verify signature")
         else:
             try:
                 signature_payload = json.loads(signature_path.read_text(encoding="utf-8"))
             except ValueError as exc:
                 errors.append(f"Invalid signature.json: {exc}")
             else:
-                if signature_payload.get("algorithm") != "hmac-sha256":
+                signature_algorithm = str(signature_payload.get("algorithm", ""))
+                if signature_algorithm != "hmac-sha256":
                     errors.append("Unsupported signature algorithm")
+
                 signature = str(signature_payload.get("signature", ""))
-                expected = hmac.new(
-                    signing_key_file.read_bytes(),
-                    manifest_path.read_bytes(),
-                    hashlib.sha256,
-                ).hexdigest()
-                if not hmac.compare_digest(signature, expected):
-                    errors.append("Manifest signature mismatch")
-    elif signature_path.exists():
+                signature_key_id = str(signature_payload.get("key_id", "")) or None
+                manifest_sha_expected = str(signature_payload.get("manifest_sha256", "")) or None
+                manifest_sha_actual = _hash_bytes(manifest_bytes)
+                if manifest_sha_expected:
+                    manifest_sha_match = hmac.compare_digest(
+                        manifest_sha_actual, manifest_sha_expected
+                    )
+                    if not manifest_sha_match:
+                        errors.append("Manifest SHA256 mismatch")
+
+                selected_key_bytes: bytes | None = None
+                if signing_key_file:
+                    selected_key_bytes = signing_key_file.read_bytes()
+                    signature_key_path = str(signing_key_file)
+                else:
+                    desired = signature_key_id
+                    if not desired:
+                        errors.append(
+                            "signature.json missing key_id; cannot select key from keyring"
+                        )
+                    elif keyring_dir is None:
+                        errors.append("Internal error: --keyring-dir missing")
+                    else:
+                        matches: list[Path] = []
+                        for candidate in sorted(keyring_dir.iterdir()):
+                            if not candidate.is_file():
+                                continue
+                            try:
+                                if candidate.stat().st_size > 64 * 1024:
+                                    continue
+                            except OSError:
+                                continue
+                            try:
+                                candidate_bytes = candidate.read_bytes()
+                            except OSError:
+                                continue
+                            if _key_id_for_bytes(candidate_bytes) == desired:
+                                matches.append(candidate)
+                        if not matches:
+                            errors.append(f"No key found in keyring for key_id={desired}")
+                        elif len(matches) > 1:
+                            errors.append(f"Multiple keys matched in keyring for key_id={desired}")
+                        else:
+                            selected = matches[0]
+                            selected_key_bytes = selected.read_bytes()
+                            signature_key_path = str(selected)
+
+                if selected_key_bytes is not None:
+                    actual_key_id = _key_id_for_bytes(selected_key_bytes)
+                    if signature_key_id and actual_key_id != signature_key_id:
+                        errors.append("Signing key_id mismatch")
+
+                    expected_sig = hmac.new(
+                        selected_key_bytes,
+                        manifest_bytes,
+                        hashlib.sha256,
+                    ).hexdigest()
+                    signature_verified = hmac.compare_digest(signature, expected_sig)
+                    if not signature_verified:
+                        errors.append("Manifest signature mismatch")
+    elif signature_present and normalized_format == "text":
         console.print("signature.json found; skipping signature verification (no key provided)")
+
+    report = {
+        "schema_version": 1,
+        "bundle_dir": str(bundle_dir),
+        "ok": len(errors) == 0,
+        "errors": errors,
+        "artifacts": artifact_results,
+        "bundle_fingerprint": {
+            "expected_sha256": bundle_hash_expected,
+            "actual_sha256": bundle_hash_actual,
+            "match": bundle_hash_match,
+        },
+        "signature": {
+            "present": signature_present,
+            "verified": signature_verified,
+            "algorithm": signature_algorithm,
+            "key_id": signature_key_id,
+            "key_path": signature_key_path,
+            "manifest_sha256_expected": manifest_sha_expected,
+            "manifest_sha256_actual": manifest_sha_actual,
+            "manifest_sha256_match": manifest_sha_match,
+        },
+    }
+
+    if normalized_format == "json":
+        # Avoid rich wrapping inserting newlines inside long string values.
+        typer.echo(_json_payload_text(report), nl=False)
+        if errors:
+            raise typer.Exit(code=1)
+        return
 
     if errors:
         for error in errors:
             console.print(f"[red]{error}[/red]")
         raise typer.Exit(code=1)
 
-    if signing_key_file:
+    if signing_key_file or keyring_dir:
         console.print("Evidence bundle integrity and signature verification passed")
         return
     console.print("Evidence bundle integrity verification passed")
