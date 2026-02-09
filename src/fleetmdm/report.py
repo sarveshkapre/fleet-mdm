@@ -6,7 +6,7 @@ from collections.abc import Iterable
 from datetime import datetime, timezone
 from io import StringIO
 from typing import Any
-from xml.etree import ElementTree as ET
+from xml.etree import ElementTree as ET  # nosec B405 - used only to generate XML, not parse it
 
 from rich.console import Console
 from rich.table import Table
