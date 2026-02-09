@@ -96,6 +96,10 @@ assignments exist, all policies apply to all devices.
 - Compare last two runs since timestamp: `fleetmdm drift --since 2026-02-01T00:00:00Z`
 - Drift for a single policy: `fleetmdm drift --policy disk-encryption`
 
+### Doctor
+- DB stats and health signals: `fleetmdm doctor`
+- Machine-readable output: `fleetmdm doctor --format json`
+
 ### Evidence Packs
 - Export SOC-style evidence artifacts: `fleetmdm evidence export --output evidence/`
 - Redaction profiles: `--redact-profile none|minimal|strict`

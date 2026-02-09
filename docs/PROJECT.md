@@ -36,6 +36,6 @@ make release
 ```
 
 ## Next 3 improvements
-1) Add `history`/`drift` filters: `--since` and drift `--policy` for scale.
-2) Add compliance pipeline integration outputs beyond JUnit (for example, `report --format sarif`).
-3) SQLite performance hardening: indexes + `fleetmdm doctor` for DB stats and misconfiguration checks.
+1) More agent-side exporter examples (macOS: FileVault, OS update settings; Linux: disk encryption, kernel version) plus schema validation guidance.
+2) Reporting/scaling UX: add `report` and `drift` filters (`--policy`, `--device`) to reduce noise at scale.
+3) Optional read-only web dashboard for inventory + compliance + evidence verification status.

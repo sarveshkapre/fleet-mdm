@@ -11,6 +11,7 @@
 - Extend evidence redaction to policies: redact `policies.json` `raw_yaml` in `--redact-profile strict` and strip comment-only lines in `minimal`.
 - Normalize inventory `last_seen` timestamps and prevent stale ingests from overwriting newer device state.
 - Add `--since` to `fleetmdm history` and `fleetmdm drift` plus `--policy` filter for `fleetmdm drift`.
+- Add `fleetmdm doctor` and additional SQLite indexes for history/results query paths.
 - Add `--redact-config` to `fleetmdm evidence export` for allowlist/denylist redaction of inventory `facts.*` fields.
 - Add deterministic evidence `manifest.json` generation with per-artifact SHA256 and bundle fingerprinting.
 - Add `fleetmdm evidence verify` to validate evidence integrity and optional HMAC signatures.

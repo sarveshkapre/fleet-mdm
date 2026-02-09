@@ -742,3 +742,15 @@ def test_drift_supports_since_and_policy_filters(tmp_path: Path) -> None:
     assert rows[0]["policy_id"] == "disk-encryption"
     assert rows[0]["previous"] == "pass"
     assert rows[0]["current"] == "fail"
+
+
+def test_doctor_json_includes_db_stats(tmp_path: Path) -> None:
+    db_path = tmp_path / "fleet.db"
+    result = runner.invoke(app, ["doctor", "--db", str(db_path), "--format", "json"])
+    assert result.exit_code == 0
+
+    payload = json.loads(result.stdout)
+    assert payload["schema_version"] == 1
+    assert payload["db_path"].endswith("fleet.db")
+    assert payload["tables"]["devices"] == 0
+    assert "idx_compliance_runs_started_at" in payload["indexes"]

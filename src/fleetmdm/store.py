@@ -82,6 +82,14 @@ CREATE INDEX IF NOT EXISTS idx_policy_assignments_device ON policy_assignments(d
 CREATE INDEX IF NOT EXISTS idx_policy_tag_assignments_tag ON policy_tag_assignments(tag);
 CREATE INDEX IF NOT EXISTS idx_compliance_results_device ON compliance_results(device_id);
 CREATE INDEX IF NOT EXISTS idx_compliance_results_policy ON compliance_results(policy_id);
+CREATE INDEX IF NOT EXISTS idx_compliance_runs_started_at ON compliance_runs(started_at);
+CREATE INDEX IF NOT EXISTS idx_compliance_results_checked_at ON compliance_results(checked_at);
+CREATE INDEX IF NOT EXISTS idx_compliance_results_device_checked_at ON compliance_results(
+  device_id, checked_at
+);
+CREATE INDEX IF NOT EXISTS idx_compliance_results_policy_checked_at ON compliance_results(
+  policy_id, checked_at
+);
 """
 
 

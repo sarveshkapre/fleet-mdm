@@ -1098,6 +1098,125 @@ def drift(
     console.print(table)
 
 
+@app.command()
+def doctor(
+    format: str = typer.Option("table", "--format", help="table/json"),
+    db: str | None = OPT_DB,
+) -> None:
+    """Show DB stats and common misconfiguration signals."""
+    normalized_format = format.strip().lower()
+    if normalized_format not in {"table", "json"}:
+        console.print(f"[red]Unknown format: {format}[/red]")
+        raise typer.Exit(code=2)
+
+    db_path = resolve_db_path(db)
+    init_db(db_path)
+
+    warnings: list[str] = []
+    db_size_bytes = 0
+    if db_path.exists():
+        try:
+            db_size_bytes = int(db_path.stat().st_size)
+        except OSError as exc:
+            warnings.append(f"Unable to stat DB file: {exc}")
+
+    with connect(db_path) as conn:
+        sqlite_version = str(conn.execute("SELECT sqlite_version()").fetchone()[0])
+
+        page_size = int(conn.execute("PRAGMA page_size").fetchone()[0])
+        page_count = int(conn.execute("PRAGMA page_count").fetchone()[0])
+        freelist_count = int(conn.execute("PRAGMA freelist_count").fetchone()[0])
+        journal_mode = str(conn.execute("PRAGMA journal_mode").fetchone()[0])
+        synchronous = str(conn.execute("PRAGMA synchronous").fetchone()[0])
+
+        fk_issues = conn.execute("PRAGMA foreign_key_check").fetchall()
+        if fk_issues:
+            warnings.append(f"Foreign key check found {len(fk_issues)} issue(s).")
+
+        tables = {
+            "devices": int(conn.execute("SELECT COUNT(*) FROM devices").fetchone()[0]),
+            "device_facts": int(conn.execute("SELECT COUNT(*) FROM device_facts").fetchone()[0]),
+            "policies": int(conn.execute("SELECT COUNT(*) FROM policies").fetchone()[0]),
+            "policy_assignments": int(
+                conn.execute("SELECT COUNT(*) FROM policy_assignments").fetchone()[0]
+            ),
+            "policy_tag_assignments": int(
+                conn.execute("SELECT COUNT(*) FROM policy_tag_assignments").fetchone()[0]
+            ),
+            "scripts": int(conn.execute("SELECT COUNT(*) FROM scripts").fetchone()[0]),
+            "compliance_runs": int(
+                conn.execute("SELECT COUNT(*) FROM compliance_runs").fetchone()[0]
+            ),
+            "compliance_results": int(
+                conn.execute("SELECT COUNT(*) FROM compliance_results").fetchone()[0]
+            ),
+        }
+
+        indexes = [
+            str(row["name"])
+            for row in conn.execute(
+                """
+                SELECT name
+                FROM sqlite_master
+                WHERE type = 'index' AND name NOT LIKE 'sqlite_%'
+                ORDER BY name
+                """
+            ).fetchall()
+        ]
+
+    if freelist_count > 0 and page_count > 0:
+        ratio = freelist_count / page_count
+        if ratio >= 0.25:
+            warnings.append(
+                f"High freelist ratio ({freelist_count}/{page_count}); consider VACUUM for space "
+                "reclaim."
+            )
+
+    payload: dict[str, Any] = {
+        "schema_version": 1,
+        "db_path": str(db_path),
+        "db_size_bytes": db_size_bytes,
+        "sqlite_version": sqlite_version,
+        "pragmas": {
+            "page_size": page_size,
+            "page_count": page_count,
+            "freelist_count": freelist_count,
+            "journal_mode": journal_mode,
+            "synchronous": synchronous,
+        },
+        "tables": tables,
+        "indexes": indexes,
+        "warnings": warnings,
+    }
+
+    if normalized_format == "json":
+        typer.echo(json.dumps(payload, indent=2))
+        return
+
+    table = Table(title="FleetMDM Doctor")
+    table.add_column("Key")
+    table.add_column("Value")
+    table.add_row("DB", payload["db_path"])
+    table.add_row("Size (bytes)", str(payload["db_size_bytes"]))
+    table.add_row("SQLite", payload["sqlite_version"])
+    table.add_row("Journal", payload["pragmas"]["journal_mode"])
+    table.add_row("Synchronous", payload["pragmas"]["synchronous"])
+    table.add_row(
+        "Pages",
+        f"{payload['pragmas']['page_count']} @ {payload['pragmas']['page_size']} bytes",
+    )
+    table.add_row("Freelist", str(payload["pragmas"]["freelist_count"]))
+    for name, count in payload["tables"].items():
+        table.add_row(f"Table: {name}", str(count))
+    table.add_row("Indexes", str(len(payload["indexes"])))
+    console.print(table)
+
+    if warnings:
+        console.print("\nWarnings:")
+        for msg in warnings:
+            console.print(f"- {msg}")
+
+
 @evidence_key_app.command("list")
 def evidence_key_list(
     keyring_dir: Path = OPT_KEYRING_DIR,
