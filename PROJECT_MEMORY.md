@@ -8,6 +8,14 @@
   These are the highest leverage production-readiness gaps for a local-first compliance tool: reduce noise
   as runs grow, integrate with CI/code-scanning pipelines, and give operators fast DB visibility without
   needing ad-hoc SQLite poking.
+- Gap map (bounded, based on local repo + untrusted market scan):
+  - Missing: SARIF output (now shipped), operational DB introspection (`doctor`, now shipped).
+  - Weak: Scale ergonomics for frequent runs (history/drift noise; now improved via `--since`/filters).
+  - Parity: JUnit/JSON machine-readable outputs (already present; SARIF improves parity for code-scanning).
+  - Differentiator: Local-first evidence packs with manifests/signatures + verify workflow (already shipped).
+- Prioritization (impact/effort/fit/risk/confidence):
+  Picked `--since`/filters, SARIF output, and `doctor`/indexes as high-impact/low-risk CLI improvements that
+  compound across every user workflow; deferred dashboard/exporter expansions as higher-effort.
 - Evidence:
   `src/fleetmdm/cli.py`, `src/fleetmdm/store.py`, `src/fleetmdm/report.py`, `tests/test_cli.py`,
   `tests/test_store.py`, `README.md`, `docs/CHANGELOG.md`, `docs/PROJECT.md`, `docs/ROADMAP.md`.
