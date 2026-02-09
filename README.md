@@ -87,10 +87,13 @@ assignments exist, all policies apply to all devices.
 
 ### History
 - Recent results: `fleetmdm history --device mac-001 --limit 20`
+- Since timestamp: `fleetmdm history --device mac-001 --since 2026-02-01T00:00:00Z`
 - Filter by policy: `fleetmdm history --policy disk-encryption`
 
 ### Drift
 - Compare last two runs: `fleetmdm drift`
+- Compare last two runs since timestamp: `fleetmdm drift --since 2026-02-01T00:00:00Z`
+- Drift for a single policy: `fleetmdm drift --policy disk-encryption`
 
 ### Evidence Packs
 - Export SOC-style evidence artifacts: `fleetmdm evidence export --output evidence/`

@@ -89,6 +89,20 @@ def utc_now() -> str:
     return datetime.now(tz=timezone.utc).isoformat()
 
 
+def _normalize_timestamp(value: str | None) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if text.endswith(("Z", "z")):
+        text = f"{text[:-1]}+00:00"
+    dt = datetime.fromisoformat(text)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).isoformat()
+
+
 def _parse_last_seen(value: Any) -> datetime | None:
     if value is None:
         return None
@@ -378,11 +392,12 @@ def list_scripts(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     ).fetchall()
 
 
-def create_compliance_run(conn: sqlite3.Connection) -> str:
-    run_id = f"run-{utc_now()}"
+def create_compliance_run(conn: sqlite3.Connection, started_at: str | None = None) -> str:
+    normalized_started_at = _normalize_timestamp(started_at) or utc_now()
+    run_id = f"run-{normalized_started_at}"
     conn.execute(
         "INSERT INTO compliance_runs (run_id, started_at) VALUES (?, ?)",
-        (run_id, utc_now()),
+        (run_id, normalized_started_at),
     )
     return run_id
 
@@ -395,14 +410,24 @@ def add_compliance_result(
     policy_name: str,
     status: str,
     failed_checks: str,
+    checked_at: str | None = None,
 ) -> None:
+    normalized_checked_at = _normalize_timestamp(checked_at) or utc_now()
     conn.execute(
         """
         INSERT INTO compliance_results (
           run_id, device_id, policy_id, policy_name, status, failed_checks, checked_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
-        (run_id, device_id, policy_id, policy_name, status, failed_checks, utc_now()),
+        (
+            run_id,
+            device_id,
+            policy_id,
+            policy_name,
+            status,
+            failed_checks,
+            normalized_checked_at,
+        ),
     )
 
 
@@ -411,8 +436,22 @@ def list_compliance_history(
     device_id: str | None,
     policy_id: str | None,
     limit: int,
+    since: str | None = None,
 ) -> list[sqlite3.Row]:
+    normalized_since = _normalize_timestamp(since)
+
     if device_id and policy_id:
+        if normalized_since:
+            return conn.execute(
+                """
+                SELECT run_id, device_id, policy_id, policy_name, status, failed_checks, checked_at
+                FROM compliance_results
+                WHERE device_id = ? AND policy_id = ? AND checked_at >= ?
+                ORDER BY checked_at DESC, run_id DESC, device_id, policy_id
+                LIMIT ?
+                """,
+                (device_id, policy_id, normalized_since, limit),
+            ).fetchall()
         return conn.execute(
             """
             SELECT run_id, device_id, policy_id, policy_name, status, failed_checks, checked_at
@@ -425,6 +464,17 @@ def list_compliance_history(
         ).fetchall()
 
     if device_id:
+        if normalized_since:
+            return conn.execute(
+                """
+                SELECT run_id, device_id, policy_id, policy_name, status, failed_checks, checked_at
+                FROM compliance_results
+                WHERE device_id = ? AND checked_at >= ?
+                ORDER BY checked_at DESC, run_id DESC, device_id, policy_id
+                LIMIT ?
+                """,
+                (device_id, normalized_since, limit),
+            ).fetchall()
         return conn.execute(
             """
             SELECT run_id, device_id, policy_id, policy_name, status, failed_checks, checked_at
@@ -437,6 +487,17 @@ def list_compliance_history(
         ).fetchall()
 
     if policy_id:
+        if normalized_since:
+            return conn.execute(
+                """
+                SELECT run_id, device_id, policy_id, policy_name, status, failed_checks, checked_at
+                FROM compliance_results
+                WHERE policy_id = ? AND checked_at >= ?
+                ORDER BY checked_at DESC, run_id DESC, device_id, policy_id
+                LIMIT ?
+                """,
+                (policy_id, normalized_since, limit),
+            ).fetchall()
         return conn.execute(
             """
             SELECT run_id, device_id, policy_id, policy_name, status, failed_checks, checked_at
@@ -446,6 +507,18 @@ def list_compliance_history(
             LIMIT ?
             """,
             (policy_id, limit),
+        ).fetchall()
+
+    if normalized_since:
+        return conn.execute(
+            """
+            SELECT run_id, device_id, policy_id, policy_name, status, failed_checks, checked_at
+            FROM compliance_results
+            WHERE checked_at >= ?
+            ORDER BY checked_at DESC, run_id DESC, device_id, policy_id
+            LIMIT ?
+            """,
+            (normalized_since, limit),
         ).fetchall()
 
     return conn.execute(
@@ -459,14 +532,40 @@ def list_compliance_history(
     ).fetchall()
 
 
-def list_recent_runs(conn: sqlite3.Connection, limit: int) -> list[sqlite3.Row]:
+def list_recent_runs(
+    conn: sqlite3.Connection, limit: int, since: str | None = None
+) -> list[sqlite3.Row]:
+    normalized_since = _normalize_timestamp(since)
+    if normalized_since:
+        return conn.execute(
+            """
+            SELECT run_id, started_at
+            FROM compliance_runs
+            WHERE started_at >= ?
+            ORDER BY started_at DESC
+            LIMIT ?
+            """,
+            (normalized_since, limit),
+        ).fetchall()
     return conn.execute(
         "SELECT run_id, started_at FROM compliance_runs ORDER BY started_at DESC LIMIT ?",
         (limit,),
     ).fetchall()
 
 
-def list_results_for_run(conn: sqlite3.Connection, run_id: str) -> list[sqlite3.Row]:
+def list_results_for_run(
+    conn: sqlite3.Connection, run_id: str, policy_id: str | None = None
+) -> list[sqlite3.Row]:
+    if policy_id:
+        return conn.execute(
+            """
+            SELECT device_id, policy_id, policy_name, status, failed_checks, checked_at
+            FROM compliance_results
+            WHERE run_id = ? AND policy_id = ?
+            ORDER BY device_id, policy_id
+            """,
+            (run_id, policy_id),
+        ).fetchall()
     return conn.execute(
         """
         SELECT device_id, policy_id, policy_name, status, failed_checks, checked_at

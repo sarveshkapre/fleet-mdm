@@ -140,6 +140,66 @@ def test_list_compliance_history_filters(tmp_path: Path) -> None:
     assert str(device_policy_rows[0]["policy_id"]) == "disk-encryption"
 
 
+def test_list_compliance_history_since_filters(tmp_path: Path) -> None:
+    db_path = tmp_path / "fleet.db"
+    init_db(db_path)
+
+    policy_yaml = dedent(
+        """
+        id: disk-encryption
+        name: Disk Encryption Enabled
+        checks:
+          - key: disk.encrypted
+            op: eq
+            value: true
+        """
+    ).strip()
+
+    device = {
+        "device_id": "mac-001",
+        "hostname": "studio-1",
+        "os": "macos",
+        "os_version": "14.4",
+        "serial": "C02XYZ123",
+        "last_seen": "2026-02-01T15:30:00Z",
+        "facts": {"disk": {"encrypted": True}},
+    }
+
+    with connect(db_path) as conn:
+        ingest_devices(conn, [device])
+        add_policy(conn, "disk-encryption", "Disk Encryption Enabled", None, policy_yaml)
+
+        run1 = create_compliance_run(conn, started_at="2026-02-01T00:00:00Z")
+        add_compliance_result(
+            conn,
+            run1,
+            "mac-001",
+            "disk-encryption",
+            "Disk Encryption Enabled",
+            "pass",
+            "",
+            checked_at="2026-02-01T00:00:00Z",
+        )
+
+        run2 = create_compliance_run(conn, started_at="2026-02-03T00:00:00Z")
+        add_compliance_result(
+            conn,
+            run2,
+            "mac-001",
+            "disk-encryption",
+            "Disk Encryption Enabled",
+            "fail",
+            "disk.encrypted",
+            checked_at="2026-02-03T00:00:00Z",
+        )
+
+        rows = list_compliance_history(conn, None, None, 50, since="2026-02-02T00:00:00")
+
+    assert len(rows) == 1
+    assert str(rows[0]["run_id"]) == run2
+    assert str(rows[0]["status"]) == "fail"
+
+
 def test_ingest_devices_skips_stale_last_seen(tmp_path: Path) -> None:
     db_path = tmp_path / "fleet.db"
     init_db(db_path)

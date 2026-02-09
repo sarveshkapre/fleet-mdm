@@ -6,6 +6,14 @@ from xml.etree import ElementTree as ET
 from typer.testing import CliRunner
 
 from fleetmdm.cli import app
+from fleetmdm.store import (
+    add_compliance_result,
+    add_policy,
+    connect,
+    create_compliance_run,
+    ingest_devices,
+    init_db,
+)
 
 runner = CliRunner()
 
@@ -515,3 +523,184 @@ def test_report_junit_format_emits_failures(tmp_path: Path) -> None:
     failing = [case for case in cases if case.attrib.get("name") == "disk-encryption"]
     assert failing
     assert failing[0].find("failure") is not None
+
+
+def test_history_since_filters_rows(tmp_path: Path) -> None:
+    db_path = tmp_path / "fleet.db"
+    init_db(db_path)
+
+    device = {
+        "device_id": "mac-001",
+        "hostname": "studio-1",
+        "os": "macos",
+        "os_version": "14.4",
+        "serial": "C02XYZ123",
+        "last_seen": "2026-02-01T15:30:00Z",
+        "facts": {"disk": {"encrypted": True}},
+    }
+    policy_yaml = "\n".join(
+        [
+            "id: disk-encryption",
+            "name: Disk Encryption Enabled",
+            "checks:",
+            "  - key: disk.encrypted",
+            "    op: eq",
+            "    value: true",
+            "",
+        ]
+    )
+
+    with connect(db_path) as conn:
+        ingest_devices(conn, [device])
+        add_policy(conn, "disk-encryption", "Disk Encryption Enabled", None, policy_yaml)
+
+        run1 = create_compliance_run(conn, started_at="2026-02-01T00:00:00Z")
+        add_compliance_result(
+            conn,
+            run1,
+            "mac-001",
+            "disk-encryption",
+            "Disk Encryption Enabled",
+            "pass",
+            "",
+            checked_at="2026-02-01T00:00:00Z",
+        )
+
+        run2 = create_compliance_run(conn, started_at="2026-02-03T00:00:00Z")
+        add_compliance_result(
+            conn,
+            run2,
+            "mac-001",
+            "disk-encryption",
+            "Disk Encryption Enabled",
+            "fail",
+            "disk.encrypted",
+            checked_at="2026-02-03T00:00:00Z",
+        )
+
+    result = runner.invoke(
+        app,
+        [
+            "history",
+            "--db",
+            str(db_path),
+            "--format",
+            "json",
+            "--since",
+            "2026-02-02T00:00:00Z",
+        ],
+    )
+    assert result.exit_code == 0
+
+    rows = json.loads(result.stdout)
+    assert len(rows) == 1
+    assert rows[0]["status"] == "fail"
+    assert rows[0]["checked_at"].startswith("2026-02-03T00:00:00")
+
+
+def test_drift_supports_since_and_policy_filters(tmp_path: Path) -> None:
+    db_path = tmp_path / "fleet.db"
+    init_db(db_path)
+
+    device = {
+        "device_id": "mac-001",
+        "hostname": "studio-1",
+        "os": "macos",
+        "os_version": "14.4",
+        "serial": "C02XYZ123",
+        "last_seen": "2026-02-01T15:30:00Z",
+        "facts": {"disk": {"encrypted": True}, "cpu": {"cores": 8}},
+    }
+    disk_yaml = "\n".join(
+        [
+            "id: disk-encryption",
+            "name: Disk Encryption Enabled",
+            "checks:",
+            "  - key: disk.encrypted",
+            "    op: eq",
+            "    value: true",
+            "",
+        ]
+    )
+    cpu_yaml = "\n".join(
+        [
+            "id: cpu-min",
+            "name: CPU Minimum",
+            "checks:",
+            "  - key: cpu.cores",
+            "    op: gte",
+            "    value: 8",
+            "",
+        ]
+    )
+
+    with connect(db_path) as conn:
+        ingest_devices(conn, [device])
+        add_policy(conn, "disk-encryption", "Disk Encryption Enabled", None, disk_yaml)
+        add_policy(conn, "cpu-min", "CPU Minimum", None, cpu_yaml)
+
+        run2 = create_compliance_run(conn, started_at="2026-02-03T00:00:00Z")
+        add_compliance_result(
+            conn,
+            run2,
+            "mac-001",
+            "disk-encryption",
+            "Disk Encryption Enabled",
+            "pass",
+            "",
+            checked_at="2026-02-03T00:00:00Z",
+        )
+        add_compliance_result(
+            conn,
+            run2,
+            "mac-001",
+            "cpu-min",
+            "CPU Minimum",
+            "pass",
+            "",
+            checked_at="2026-02-03T00:00:00Z",
+        )
+
+        run3 = create_compliance_run(conn, started_at="2026-02-05T00:00:00Z")
+        add_compliance_result(
+            conn,
+            run3,
+            "mac-001",
+            "disk-encryption",
+            "Disk Encryption Enabled",
+            "fail",
+            "disk.encrypted",
+            checked_at="2026-02-05T00:00:00Z",
+        )
+        add_compliance_result(
+            conn,
+            run3,
+            "mac-001",
+            "cpu-min",
+            "CPU Minimum",
+            "fail",
+            "cpu.cores",
+            checked_at="2026-02-05T00:00:00Z",
+        )
+
+    filtered = runner.invoke(
+        app,
+        [
+            "drift",
+            "--db",
+            str(db_path),
+            "--format",
+            "json",
+            "--since",
+            "2026-02-02T00:00:00Z",
+            "--policy",
+            "disk-encryption",
+        ],
+    )
+    assert filtered.exit_code == 0
+
+    rows = json.loads(filtered.stdout)
+    assert len(rows) == 1
+    assert rows[0]["policy_id"] == "disk-encryption"
+    assert rows[0]["previous"] == "pass"
+    assert rows[0]["current"] == "fail"

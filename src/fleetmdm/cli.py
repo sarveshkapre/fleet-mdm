@@ -76,6 +76,7 @@ OPT_DEVICE = typer.Option(..., "--device", help="Device ID")
 OPT_DEVICE_OPTIONAL = typer.Option(None, "--device", help="Device ID")
 OPT_NAME = typer.Option(None, "--name", help="Script name")
 OPT_POLICY_ID_OPTIONAL = typer.Option(None, "--policy", help="Policy ID")
+OPT_SINCE = typer.Option(None, "--since", help="ISO8601 timestamp (filters newer-than-or-equal)")
 OPT_LIMIT = typer.Option(50, "--limit", help="Limit rows")
 OPT_EVIDENCE_OUTPUT = typer.Option(None, "--output", help="Directory for evidence bundle")
 OPT_REDACT_PROFILE = typer.Option(
@@ -998,6 +999,7 @@ def report(
 def history(
     device_id: str | None = OPT_DEVICE_OPTIONAL,
     policy_id: str | None = OPT_POLICY_ID_OPTIONAL,
+    since: str | None = OPT_SINCE,
     limit: int = OPT_LIMIT,
     format: str = typer.Option("table", "--format", help="table/json/csv"),
     db: str | None = OPT_DB,
@@ -1006,7 +1008,7 @@ def history(
     db_path = resolve_db_path(db)
     init_db(db_path)
     with connect(db_path) as conn:
-        rows = list_compliance_history(conn, device_id, policy_id, limit)
+        rows = list_compliance_history(conn, device_id, policy_id, limit, since=since)
 
     if format == "json":
         console.print(json.dumps([dict(row) for row in rows], indent=2))
@@ -1043,6 +1045,8 @@ def history(
 
 @app.command()
 def drift(
+    policy_id: str | None = OPT_POLICY_ID_OPTIONAL,
+    since: str | None = OPT_SINCE,
     format: str = typer.Option("table", "--format", help="table/json/csv"),
     db: str | None = OPT_DB,
 ) -> None:
@@ -1050,14 +1054,14 @@ def drift(
     db_path = resolve_db_path(db)
     init_db(db_path)
     with connect(db_path) as conn:
-        runs = list_recent_runs(conn, 2)
+        runs = list_recent_runs(conn, 2, since=since)
         if len(runs) < 2:
             console.print("Need at least two compliance runs to calculate drift")
             raise typer.Exit(code=1)
         latest_run = runs[0]["run_id"]
         previous_run = runs[1]["run_id"]
-        latest = list_results_for_run(conn, latest_run)
-        previous = list_results_for_run(conn, previous_run)
+        latest = list_results_for_run(conn, latest_run, policy_id=policy_id)
+        previous = list_results_for_run(conn, previous_run, policy_id=policy_id)
     changes = _compute_drift_changes(latest, previous)
 
     if format == "json":
