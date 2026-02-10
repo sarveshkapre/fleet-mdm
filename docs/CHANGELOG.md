@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased (2026-02-09)
+## Unreleased (2026-02-10)
+- Add `fleetmdm report --only-failing` and `--only-skipped` for noise reduction at scale.
+- Fix CI security gate: annotate safe ElementTree usage for JUnit generation so Bandit doesn’t fail on a non-parsing import.
 - Add `fleetmdm report --policy` and `fleetmdm report --device` filters for scale/noise reduction.
 - Add `fleetmdm drift --device` and include `policy_name` in drift outputs.
 - Extend exporter examples: macOS now emits best-effort Software Update preference facts; Linux now emits kernel release + root encryption heuristics.

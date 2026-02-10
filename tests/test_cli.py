@@ -1,3 +1,4 @@
+import csv
 import json
 import time
 from pathlib import Path
@@ -596,6 +597,115 @@ def test_report_policy_filter_limits_output(tmp_path: Path) -> None:
     rows = json.loads(result.stdout)
     assert len(rows) == 1
     assert rows[0]["policy_id"] == "disk-encryption"
+
+
+def test_report_csv_quotes_and_sanitizes_cells(tmp_path: Path) -> None:
+    db_path = tmp_path / "fleet.db"
+    policy_path = tmp_path / "policy.yaml"
+
+    policy_path.write_text(
+        "\n".join(
+            [
+                "id: \"=evil\"",
+                "name: \"Comma, Name\"",
+                "checks:",
+                "  - key: disk.encrypted",
+                "    op: eq",
+                "    value: true",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    assert runner.invoke(app, ["seed", "--db", str(db_path)]).exit_code == 0
+    assert (
+        runner.invoke(app, ["policy", "add", str(policy_path), "--db", str(db_path)]).exit_code
+        == 0
+    )
+
+    result = runner.invoke(app, ["report", "--db", str(db_path), "--format", "csv"])
+    assert result.exit_code == 0
+
+    rows = list(csv.reader(result.stdout.splitlines()))
+    header = rows[0]
+    assert header == ["policy_id", "policy_name", "passed", "failed"]
+
+    evil = next(r for r in rows[1:] if r[0] == "'=evil")
+    assert evil[1] == "Comma, Name"
+
+
+def test_report_only_failing_filters_output(tmp_path: Path) -> None:
+    db_path = tmp_path / "fleet.db"
+    policy_path = tmp_path / "policy.yaml"
+
+    policy_path.write_text(
+        "\n".join(
+            [
+                "id: disk-encryption",
+                "name: Disk Encryption Enabled",
+                "checks:",
+                "  - key: disk.encrypted",
+                "    op: eq",
+                "    value: true",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    assert runner.invoke(app, ["seed", "--db", str(db_path)]).exit_code == 0
+    assert (
+        runner.invoke(app, ["policy", "add", str(policy_path), "--db", str(db_path)]).exit_code
+        == 0
+    )
+
+    result = runner.invoke(
+        app, ["report", "--db", str(db_path), "--format", "json", "--only-failing"]
+    )
+    assert result.exit_code == 0
+    rows = json.loads(result.stdout)
+    assert len(rows) == 1
+    assert rows[0]["policy_id"] == "disk-encryption"
+    assert int(rows[0]["failed_count"]) > 0
+
+
+def test_report_only_skipped_filters_output(tmp_path: Path) -> None:
+    db_path = tmp_path / "fleet.db"
+    policy_path = tmp_path / "policy.yaml"
+
+    policy_path.write_text(
+        "\n".join(
+            [
+                "id: windows-only",
+                "name: Windows Only Policy",
+                "targets:",
+                "  os: windows",
+                "checks:",
+                "  - key: os_version",
+                "    op: version_gte",
+                "    value: \"1.0\"",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    assert runner.invoke(app, ["seed", "--db", str(db_path)]).exit_code == 0
+    assert (
+        runner.invoke(app, ["policy", "add", str(policy_path), "--db", str(db_path)]).exit_code
+        == 0
+    )
+
+    result = runner.invoke(
+        app, ["report", "--db", str(db_path), "--format", "json", "--only-skipped"]
+    )
+    assert result.exit_code == 0
+    rows = json.loads(result.stdout)
+    assert len(rows) == 1
+    assert rows[0]["policy_id"] == "windows-only"
+    assert int(rows[0]["passed_count"]) == 0
+    assert int(rows[0]["failed_count"]) == 0
 
 
 def test_history_since_filters_rows(tmp_path: Path) -> None:

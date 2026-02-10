@@ -36,6 +36,6 @@ make release
 ```
 
 ## Next 3 improvements
-1) Reporting UX for scale: add `report --only-failing` / `--only-skipped` (and maybe `--only-assigned`) to reduce noise.
-2) Drift UX: optionally include “new”/“missing” rows (policy/device present in one run but not the other) behind a flag.
-3) SARIF quality: optionally emit per-device failures (bounded) and include richer SARIF rule metadata (descriptions, help URIs).
+1) Drift UX: optionally include “new”/“missing” rows (policy/device present in one run but not the other) behind a flag.
+2) SARIF quality: optionally emit per-device failures (bounded) and include richer SARIF rule metadata (descriptions, help URIs).
+3) Reporting UX for scale: add `report --only-assigned` (optional) to force “assigned-only” evaluation for big fleets.

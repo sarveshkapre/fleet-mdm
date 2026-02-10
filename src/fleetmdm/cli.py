@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import csv
 import hashlib
 import hmac
 import json
@@ -10,6 +11,7 @@ import secrets
 import sqlite3
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
+from io import StringIO
 from pathlib import Path
 from textwrap import dedent
 from typing import Any
@@ -22,6 +24,7 @@ from rich.table import Table
 
 from fleetmdm import __version__
 from fleetmdm.crypto import sha256_text
+from fleetmdm.csvutil import csv_safe_cell
 from fleetmdm.inventory import inventory_json_schema, load_inventory_json
 from fleetmdm.policy import (
     evaluate_policy,
@@ -31,7 +34,6 @@ from fleetmdm.policy import (
     validate_policy_file,
 )
 from fleetmdm.report import (
-    render_csv,
     render_json,
     render_junit_summary,
     render_sarif_summary,
@@ -929,12 +931,23 @@ def check(
         console.print(json.dumps(payload, indent=2))
         return
     if format == "csv":
-        lines = ["device_id,policy_id,policy_name,status,failed_checks"]
+        buffer = StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow(["device_id", "policy_id", "policy_name", "status", "failed_checks"])
         for entry in results_payload:
-            csv_text = render_csv(entry["results"]).splitlines()[1:]
-            for row in csv_text:
-                lines.append(f"{entry['device_id']},{row}")
-        console.print("\n".join(lines))
+            did = csv_safe_cell(entry["device_id"])
+            for result in entry["results"]:
+                failed = [check.message for check in result.checks if not check.passed]
+                writer.writerow(
+                    [
+                        did,
+                        csv_safe_cell(result.policy_id),
+                        csv_safe_cell(result.policy_name),
+                        "PASS" if result.passed else "FAIL",
+                        csv_safe_cell("; ".join(failed)),
+                    ]
+                )
+        console.print(buffer.getvalue().rstrip("\n"))
         return
     console.print(f"Unknown format: {format}")
     raise typer.Exit(code=1)
@@ -945,9 +958,21 @@ def report(
     format: str = typer.Option("table", "--format", help="table/json/csv/junit/sarif"),
     device_id: str | None = OPT_DEVICE_OPTIONAL,
     policy_id: str | None = OPT_POLICY_ID_OPTIONAL,
+    only_failing: bool = typer.Option(
+        False, "--only-failing", help="Include only policies with at least one failing device"
+    ),
+    only_skipped: bool = typer.Option(
+        False,
+        "--only-skipped",
+        help="Include only policies with no applicable devices (passed=0, failed=0)",
+    ),
     db: str | None = OPT_DB,
 ) -> None:
     """Summary compliance report across devices."""
+    if only_failing and only_skipped:
+        console.print("Options --only-failing and --only-skipped are mutually exclusive")
+        raise typer.Exit(code=1)
+
     normalized_device_id = (device_id or "").strip() or None
     normalized_policy_id = (policy_id or "").strip() or None
 
@@ -1013,29 +1038,47 @@ def report(
                 else:
                     summary[pid_text]["failed_count"] += 1
 
+    filtered = list(summary.values())
+    if only_failing:
+        filtered = [row for row in filtered if int(row.get("failed_count", 0) or 0) > 0]
+    elif only_skipped:
+        filtered = [
+            row
+            for row in filtered
+            if int(row.get("failed_count", 0) or 0) == 0
+            and int(row.get("passed_count", 0) or 0) == 0
+        ]
+
     if format == "json":
-        console.print(json.dumps(list(summary.values()), indent=2))
+        console.print(json.dumps(filtered, indent=2))
         return
     if format == "csv":
-        rows = ["policy_id,policy_name,passed,failed"]
-        for row in summary.values():
-            rows.append(
-                f"{row['policy_id']},{row['policy_name']},{row['passed_count']},{row['failed_count']}"
+        buffer = StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow(["policy_id", "policy_name", "passed", "failed"])
+        for row in filtered:
+            writer.writerow(
+                [
+                    csv_safe_cell(row["policy_id"]),
+                    csv_safe_cell(row["policy_name"]),
+                    row["passed_count"],
+                    row["failed_count"],
+                ]
             )
-        console.print("\n".join(rows))
+        console.print(buffer.getvalue().rstrip("\n"))
         return
     if format == "junit":
-        typer.echo(render_junit_summary(list(summary.values())), nl=False)
+        typer.echo(render_junit_summary(filtered), nl=False)
         return
     if format == "sarif":
-        typer.echo(render_sarif_summary(list(summary.values())), nl=False)
+        typer.echo(render_sarif_summary(filtered), nl=False)
         return
 
     table = Table(title="Compliance Summary")
     table.add_column("Policy")
     table.add_column("Pass")
     table.add_column("Fail")
-    for row in summary.values():
+    for row in filtered:
         table.add_row(row["policy_name"], str(row["passed_count"]), str(row["failed_count"]))
     console.print(table)
 
@@ -1059,14 +1102,32 @@ def history(
         console.print(json.dumps([dict(row) for row in rows], indent=2))
         return
     if format == "csv":
-        lines = ["run_id,device_id,policy_id,policy_name,status,failed_checks,checked_at"]
+        buffer = StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow(
+            [
+                "run_id",
+                "device_id",
+                "policy_id",
+                "policy_name",
+                "status",
+                "failed_checks",
+                "checked_at",
+            ]
+        )
         for row in rows:
-            lines.append(
-                f"{row['run_id']},{row['device_id']},{row['policy_id']},"
-                f"{row['policy_name']},{row['status']},{row['failed_checks']},"
-                f"{row['checked_at']}"
+            writer.writerow(
+                [
+                    csv_safe_cell(row["run_id"]),
+                    csv_safe_cell(row["device_id"]),
+                    csv_safe_cell(row["policy_id"]),
+                    csv_safe_cell(row["policy_name"]),
+                    csv_safe_cell(row["status"]),
+                    csv_safe_cell(row["failed_checks"]),
+                    csv_safe_cell(row["checked_at"]),
+                ]
             )
-        console.print("\n".join(lines))
+        console.print(buffer.getvalue().rstrip("\n"))
         return
 
     table = Table(title="Compliance History")
@@ -1124,13 +1185,20 @@ def drift(
         console.print(json.dumps(changes, indent=2))
         return
     if format == "csv":
-        lines = ["device_id,policy_id,policy_name,previous,current"]
+        buffer = StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow(["device_id", "policy_id", "policy_name", "previous", "current"])
         for row in changes:
-            lines.append(
-                f"{row['device_id']},{row['policy_id']},{row.get('policy_name','')},"
-                f"{row['previous']},{row['current']}"
+            writer.writerow(
+                [
+                    csv_safe_cell(row["device_id"]),
+                    csv_safe_cell(row["policy_id"]),
+                    csv_safe_cell(row.get("policy_name", "")),
+                    csv_safe_cell(row["previous"]),
+                    csv_safe_cell(row["current"]),
+                ]
             )
-        console.print("\n".join(lines))
+        console.print(buffer.getvalue().rstrip("\n"))
         return
 
     table = Table(title="Compliance Drift (last two runs)")

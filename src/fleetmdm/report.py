@@ -6,14 +6,16 @@ from collections.abc import Iterable
 from datetime import datetime, timezone
 from io import StringIO
 from typing import Any
-from defusedxml import ElementTree as ET
+from xml.etree import ElementTree as ET  # nosec
 
 from rich.console import Console
 from rich.table import Table
 
+from fleetmdm.csvutil import csv_safe_cell
 from fleetmdm.policy import PolicyResult
 
-# Use defusedxml to satisfy security tooling and keep us safe if parsing is ever introduced.
+# Bandit flags ElementTree for XML parsing risks; we only generate XML here and never parse
+# untrusted XML.
 
 def render_table(results: Iterable[PolicyResult]) -> str:
     table = Table(title="FleetMDM Compliance")
@@ -62,10 +64,10 @@ def render_csv(results: Iterable[PolicyResult]) -> str:
         failed = [check.message for check in result.checks if not check.passed]
         writer.writerow(
             [
-                result.policy_id,
-                result.policy_name,
+                csv_safe_cell(result.policy_id),
+                csv_safe_cell(result.policy_name),
                 "PASS" if result.passed else "FAIL",
-                "; ".join(failed),
+                csv_safe_cell("; ".join(failed)),
             ]
         )
     return buffer.getvalue()

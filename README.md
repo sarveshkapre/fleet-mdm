@@ -75,6 +75,8 @@ fleetmdm report --format junit > report.xml
 
 # Scale/noise reduction
 fleetmdm report --policy disk-encryption
+fleetmdm report --only-failing
+fleetmdm report --only-skipped
 fleetmdm drift --device mac-001
 ```
 
