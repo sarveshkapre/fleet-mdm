@@ -5,6 +5,11 @@
   Add `fleetmdm report --only-failing` and `--only-skipped` to reduce noise at scale, and harden CSV outputs by switching CLI CSV emitters to `csv.writer` plus basic spreadsheet formula injection protection.
 - Why:
   Large fleet reporting needs first-order noise controls, and CSV exports are a common audit artifact where quoting and formula injection defenses prevent avoidable footguns.
+- Gap map (bounded; based on local repo + untrusted market scan):
+  - Missing: `report --only-assigned`, drift “new/missing rows”, optional dashboard.
+  - Weak: CSV robustness/safety (now improved), scale-oriented report slicing (now improved).
+  - Parity: machine-readable outputs (JSON/JUnit/SARIF) plus exportable summaries.
+  - Differentiator: local-first evidence packs with manifests/signatures + verify workflow.
 - Evidence:
   `src/fleetmdm/cli.py`, `src/fleetmdm/report.py`, `src/fleetmdm/csvutil.py`, `tests/test_cli.py`, `README.md`,
   `docs/CHANGELOG.md`, `docs/PROJECT.md`, `docs/ROADMAP.md`.
