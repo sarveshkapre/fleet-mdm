@@ -6,15 +6,14 @@ from collections.abc import Iterable
 from datetime import datetime, timezone
 from io import StringIO
 from typing import Any
-from xml.etree import ElementTree as ET  # nosec B405
+from defusedxml import ElementTree as ET
 
 from rich.console import Console
 from rich.table import Table
 
 from fleetmdm.policy import PolicyResult
 
-# Bandit flags ElementTree for XML parsing risks; we only generate XML here and never parse
-# untrusted XML.
+# Use defusedxml to satisfy security tooling and keep us safe if parsing is ever introduced.
 
 def render_table(results: Iterable[PolicyResult]) -> str:
     table = Table(title="FleetMDM Compliance")
