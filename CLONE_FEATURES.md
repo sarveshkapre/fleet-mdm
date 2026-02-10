@@ -7,8 +7,6 @@
 - Gaps found during codebase exploration
 
 ## Candidate Features To Do
-- [ ] P0 - CI/security: fix Bandit B405 on XML tooling used for report generation (ensure `make security` passes in GitHub Actions).
-- [ ] P1 - Report UX: add `fleetmdm report --only-failing` and `--only-skipped` to reduce noise on large fleets.
 - [ ] P2 - Report UX: consider `fleetmdm report --only-assigned` to force “assigned-only” evaluation even when no assignments exist (opt-in safety for scale).
 - [ ] P2 - Drift UX: include “new”/“missing” rows (policy/device present in one run but not the other) behind a flag.
 - [ ] P2 - SARIF quality: optionally emit per-device failures (with a cap) and include richer SARIF rule metadata (descriptions, help URIs).
@@ -19,6 +17,9 @@
 - [ ] P3 - Release hygiene: add a `__main__.py` (or equivalent) so `python -m fleetmdm` works, and confirm `make build` produces a runnable wheel/sdist.
 
 ## Implemented
+- [x] 2026-02-10 - Report UX: add `fleetmdm report --only-failing` and `--only-skipped` for scale/noise reduction. Evidence: `src/fleetmdm/cli.py`, `tests/test_cli.py`, `README.md`, `docs/CHANGELOG.md`.
+- [x] 2026-02-10 - CSV export hardening: use proper CSV writers and mitigate spreadsheet formula injection across CSV outputs (`check`/`report`/`history`/`drift`). Evidence: `src/fleetmdm/csvutil.py`, `src/fleetmdm/cli.py`, `src/fleetmdm/report.py`, `tests/test_cli.py`.
+- [x] 2026-02-10 - CI security gate: suppress Bandit B405 false positive on safe JUnit XML generation import. Evidence: `src/fleetmdm/report.py`, `make security`.
 - [x] 2026-02-09 - Exporters: extend macOS exporter with OS update preference facts and Linux exporter with kernel + disk encryption heuristics; add schema validation guidance. Evidence: `examples/exporters/macos_inventory.py`, `examples/exporters/linux_inventory.py`, `examples/exporters/README.md`.
 - [x] 2026-02-09 - Reporting/scaling UX: add `report --policy` and `report --device` filters. Evidence: `src/fleetmdm/cli.py`, `src/fleetmdm/store.py`, `tests/test_cli.py`, `README.md`.
 - [x] 2026-02-09 - Drift UX: add `drift --device` filter and include `policy_name` in drift output (json/csv/table). Evidence: `src/fleetmdm/cli.py`, `src/fleetmdm/store.py`, `tests/test_cli.py`, `README.md`.
@@ -65,6 +66,7 @@
 - SARIF output makes FleetMDM results first-class in code-scanning/compliance pipelines without forcing a hosted service.
 - A lightweight `doctor` command reduces operational friction (DB size, counts, pragmas, index visibility) and makes troubleshooting repeatable.
 - Market scan signals that exportable audit artifacts and scheduled exports are baseline expectations; CLI filters + machine-readable outputs are high leverage.
+- CSV exports are a frequent audit artifact; protecting against spreadsheet formula injection is a cheap, high-signal hardening step (especially when inventory/policy strings are untrusted inputs).
 
 ## Notes
 - This file is maintained by the autonomous clone loop.

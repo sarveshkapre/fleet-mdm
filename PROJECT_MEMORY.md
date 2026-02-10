@@ -1,5 +1,38 @@
 # Project Memory
 
+## 2026-02-10 - Cycle 1 - Report Noise Filters + CSV Export Hardening
+- Recent Decisions:
+  Add `fleetmdm report --only-failing` and `--only-skipped` to reduce noise at scale, and harden CSV outputs by switching CLI CSV emitters to `csv.writer` plus basic spreadsheet formula injection protection.
+- Why:
+  Large fleet reporting needs first-order noise controls, and CSV exports are a common audit artifact where quoting and formula injection defenses prevent avoidable footguns.
+- Evidence:
+  `src/fleetmdm/cli.py`, `src/fleetmdm/report.py`, `src/fleetmdm/csvutil.py`, `tests/test_cli.py`, `README.md`,
+  `docs/CHANGELOG.md`, `docs/PROJECT.md`, `docs/ROADMAP.md`.
+- Verification Evidence:
+  `make check` (pass)
+  `make security` (pass)
+  Smoke (pass):
+  ```bash
+  tmpdir=$(mktemp -d)
+  db="$tmpdir/fleet.db"
+  .venv/bin/python -m fleetmdm.cli init --db "$db"
+  .venv/bin/python -m fleetmdm.cli seed --db "$db"
+  .venv/bin/python -m fleetmdm.cli check --db "$db" --device mac-001
+  .venv/bin/python -m fleetmdm.cli report --db "$db" --format json --only-failing >/dev/null
+  .venv/bin/python -m fleetmdm.cli report --db "$db" --format csv >/dev/null
+  ```
+- Commit:
+  `6ec26aa`.
+- Confidence:
+  High.
+- Trust Label:
+  `verified-local`.
+- Market scan (bounded, untrusted):
+  - Microsoft Intune surfaces device compliance reporting and export as a baseline expectation for MDM operations. https://learn.microsoft.com/en-us/mem/intune/protect/compliance-reports
+  - Jamf positions compliance benchmarking/reporting as a first-class workflow surface area. https://learn.jamf.com/en-US/bundle/jamf-pro-documentation-current/page/Compliance_Benchmarks.html
+  - FleetDM’s docs emphasize automation-first inventory/compliance workflows and exportable outputs as table-stakes. https://fleetdm.com/docs
+  - FleetDM’s handbook calls out CSV injection risks and mitigations, reinforcing the value of safe-by-default CSV emitters. https://fleetdm.com/handbook/company/security#csv-injection
+
 ## 2026-02-09 - Cycle 5 - Report/Drift Filters + Exporter Parity
 - Recent Decisions:
   Add `report --policy/--device` filters, add `drift --device` and include `policy_name` in drift output, fix `make dev` to run the real CLI module, and enrich exporter examples (macOS Software Update preferences; Linux kernel + disk encryption heuristics).

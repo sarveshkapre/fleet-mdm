@@ -72,5 +72,7 @@
 - Prevention Rules:
   Run `make security` before pushing.
   When using a blacklisted module for safe-only usage (generation not parsing), document and suppress with a targeted `# nosec` + justification; otherwise prefer string rendering or a hardened XML library if parsing is needed.
+- Notes:
+  2026-02-10: Bandit in CI did not honor `# nosec B405` on the import line in this repo; prefer plain `# nosec` for B405 suppressions.
 - Status:
   Mitigated on `main` (commit `3851144`).
