@@ -6,7 +6,7 @@
 - Add `fleetmdm report --policy` and `fleetmdm report --device` filters for scale/noise reduction.
 - Add `fleetmdm drift --device` and include `policy_name` in drift outputs.
 - Extend exporter examples: macOS now emits best-effort Software Update preference facts; Linux now emits kernel release + root encryption heuristics.
-- Fix `make dev` to run `python -m fleetmdm.cli` (package has no `__main__`).
+- Add `fleetmdm.__main__` so `python -m fleetmdm` works; `make dev` now runs that entrypoint.
 - Add `fleetmdm evidence keygen` to generate signing keys with stable key IDs.
 - Add `keys/keyring.json` keyring manifests with key lifecycle metadata (created/activated/revoked) plus `fleetmdm evidence key list` and `fleetmdm evidence key revoke`.
 - Add `--keyring-dir` to `fleetmdm evidence verify` to support signing key rotation via key-ID selection.

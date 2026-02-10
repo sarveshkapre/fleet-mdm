@@ -14,9 +14,9 @@
 - [ ] P3 - `fleetmdm doctor` enhancements: optional `--integrity-check` and `--vacuum` guidance/automation.
 - [ ] P3 - Config file support (for default `--db`, redaction defaults, evidence output path).
 - [ ] P3 - Optional read-only web dashboard for inventory + compliance + evidence verification status.
-- [ ] P3 - Release hygiene: add a `__main__.py` (or equivalent) so `python -m fleetmdm` works, and confirm `make build` produces a runnable wheel/sdist.
 
 ## Implemented
+- [x] 2026-02-10 - Release hygiene: add `fleetmdm.__main__` so `python -m fleetmdm` works; ensure `python -m fleetmdm.cli` also runs; update `make dev` and add a smoke test. Evidence: `src/fleetmdm/__main__.py`, `src/fleetmdm/cli.py`, `Makefile`, `tests/test_cli.py`.
 - [x] 2026-02-10 - Report UX: add `fleetmdm report --only-failing` and `--only-skipped` for scale/noise reduction. Evidence: `src/fleetmdm/cli.py`, `tests/test_cli.py`, `README.md`, `docs/CHANGELOG.md`.
 - [x] 2026-02-10 - CSV export hardening: use proper CSV writers and mitigate spreadsheet formula injection across CSV outputs (`check`/`report`/`history`/`drift`). Evidence: `src/fleetmdm/csvutil.py`, `src/fleetmdm/cli.py`, `src/fleetmdm/report.py`, `tests/test_cli.py`.
 - [x] 2026-02-10 - CI security gate: suppress Bandit B405 false positive on safe JUnit XML generation import. Evidence: `src/fleetmdm/report.py`, `make security`.

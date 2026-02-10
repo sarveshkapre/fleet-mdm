@@ -1,5 +1,28 @@
 # Project Memory
 
+## 2026-02-10 - Cycle 2 - Python `-m` Entrypoint Parity
+- Recent Decisions:
+  Add `fleetmdm.__main__` and a `fleetmdm.cli:main` entrypoint so `python -m fleetmdm` and `python -m fleetmdm.cli` execute the CLI; update `make dev` to use `python -m fleetmdm --help`; add a small smoke test.
+- Why:
+  `python -m ...` module execution is a common local/CI smoke path and avoids relying on the console script wrapper.
+  Previously `python -m fleetmdm.cli` was a no-op (module import only), which could mask broken smoke commands.
+- Evidence:
+  `src/fleetmdm/__main__.py`, `src/fleetmdm/cli.py`, `Makefile`, `tests/test_cli.py`, `docs/CHANGELOG.md`, `CLONE_FEATURES.md`.
+- Verification Evidence:
+  `make check` (pass)
+  `make security` (pass)
+  Smoke (pass):
+  ```bash
+  .venv/bin/python -m fleetmdm --help >/dev/null
+  .venv/bin/python -m fleetmdm.cli --help >/dev/null
+  ```
+- Commit:
+  `3381afe`.
+- Confidence:
+  High.
+- Trust Label:
+  `verified-local`.
+
 ## 2026-02-10 - Cycle 1 - Report Noise Filters + CSV Export Hardening
 - Recent Decisions:
   Add `fleetmdm report --only-failing` and `--only-skipped` to reduce noise at scale, and harden CSV outputs by switching CLI CSV emitters to `csv.writer` plus basic spreadsheet formula injection protection.
