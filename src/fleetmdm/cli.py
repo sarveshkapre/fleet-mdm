@@ -2128,3 +2128,13 @@ def seed(
         policy = load_policy(policy_yaml)
         add_policy(conn, policy.id, policy.name, policy.description, policy_yaml)
     console.print("Seeded sample data")
+
+
+def main() -> None:
+    """Entrypoint for `python -m fleetmdm.cli`."""
+
+    app(prog_name="fleetmdm")
+
+
+if __name__ == "__main__":
+    main()

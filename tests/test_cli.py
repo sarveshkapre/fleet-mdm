@@ -1,5 +1,7 @@
 import csv
 import json
+import subprocess
+import sys
 import time
 from pathlib import Path
 from xml.etree import ElementTree as ET
@@ -17,6 +19,19 @@ from fleetmdm.store import (
 )
 
 runner = CliRunner()
+
+
+def test_python_module_entrypoints_show_help() -> None:
+    # These smoke the `python -m` entrypoints that people use in Makefiles/CI.
+    for module in ("fleetmdm", "fleetmdm.cli"):
+        proc = subprocess.run(
+            [sys.executable, "-m", module, "--help"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert proc.returncode == 0
+        assert (proc.stdout + proc.stderr).strip()
 
 
 def test_script_list_initializes_database(tmp_path: Path) -> None:
