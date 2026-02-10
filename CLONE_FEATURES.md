@@ -7,13 +7,16 @@
 - Gaps found during codebase exploration
 
 ## Candidate Features To Do
-- [ ] P2 - Report UX: add `report --only-failing` and `report --only-skipped` switches for big fleets.
+- [ ] P0 - CI/security: fix Bandit B405 on XML tooling used for report generation (ensure `make security` passes in GitHub Actions).
+- [ ] P1 - Report UX: add `fleetmdm report --only-failing` and `--only-skipped` to reduce noise on large fleets.
+- [ ] P2 - Report UX: consider `fleetmdm report --only-assigned` to force “assigned-only” evaluation even when no assignments exist (opt-in safety for scale).
 - [ ] P2 - Drift UX: include “new”/“missing” rows (policy/device present in one run but not the other) behind a flag.
 - [ ] P2 - SARIF quality: optionally emit per-device failures (with a cap) and include richer SARIF rule metadata (descriptions, help URIs).
-- [ ] P3 - Evidence packs: optionally include bounded `history` excerpts in evidence bundles for audit trails.
+- [ ] P3 - Evidence packs: optionally include bounded `fleetmdm history` excerpts in evidence bundles for audit trails.
 - [ ] P3 - `fleetmdm doctor` enhancements: optional `--integrity-check` and `--vacuum` guidance/automation.
 - [ ] P3 - Config file support (for default `--db`, redaction defaults, evidence output path).
 - [ ] P3 - Optional read-only web dashboard for inventory + compliance + evidence verification status.
+- [ ] P3 - Release hygiene: add a `__main__.py` (or equivalent) so `python -m fleetmdm` works, and confirm `make build` produces a runnable wheel/sdist.
 
 ## Implemented
 - [x] 2026-02-09 - Exporters: extend macOS exporter with OS update preference facts and Linux exporter with kernel + disk encryption heuristics; add schema validation guidance. Evidence: `examples/exporters/macos_inventory.py`, `examples/exporters/linux_inventory.py`, `examples/exporters/README.md`.
