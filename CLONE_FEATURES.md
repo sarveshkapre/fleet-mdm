@@ -7,15 +7,23 @@
 - Gaps found during codebase exploration
 
 ## Candidate Features To Do
-- [ ] P2 - Report UX: consider `fleetmdm report --only-assigned` to force “assigned-only” evaluation even when no assignments exist (opt-in safety for scale).
-- [ ] P2 - Drift UX: include “new”/“missing” rows (policy/device present in one run but not the other) behind a flag.
-- [ ] P2 - SARIF quality: optionally emit per-device failures (with a cap) and include richer SARIF rule metadata (descriptions, help URIs).
-- [ ] P3 - Evidence packs: optionally include bounded `fleetmdm history` excerpts in evidence bundles for audit trails.
-- [ ] P3 - `fleetmdm doctor` enhancements: optional `--integrity-check` and `--vacuum` guidance/automation.
-- [ ] P3 - Config file support (for default `--db`, redaction defaults, evidence output path).
-- [ ] P3 - Optional read-only web dashboard for inventory + compliance + evidence verification status.
+- [ ] P2 - SARIF quality: optionally emit bounded per-device failures and richer rule metadata (`helpUri`, policy descriptions). Score: impact 4, effort 3, fit 4, differentiation 2, risk 2, confidence 4.
+- [ ] P2 - Evidence packs: optionally include bounded `fleetmdm history` excerpts for audit trails. Score: impact 4, effort 3, fit 4, differentiation 3, risk 2, confidence 4.
+- [ ] P2 - Report UX: add `--sort-by failed|passed|name` and `--top N` for large-fleet triage. Score: impact 4, effort 2, fit 4, differentiation 2, risk 1, confidence 4.
+- [ ] P2 - Reliability: validate `--since` values in CLI and return clear exit code/message on malformed timestamps. Score: impact 4, effort 1, fit 5, differentiation 1, risk 1, confidence 5.
+- [ ] P2 - CI reliability: pin Python patch version in workflow matrix and add periodic dependency update policy doc. Score: impact 3, effort 2, fit 4, differentiation 1, risk 1, confidence 4.
+- [ ] P3 - `fleetmdm doctor` enhancements: optional `--integrity-check` and `--vacuum` guidance/automation. Score: impact 3, effort 3, fit 4, differentiation 2, risk 2, confidence 4.
+- [ ] P3 - Config file support for default `--db`, report defaults, and evidence output path. Score: impact 3, effort 4, fit 4, differentiation 2, risk 2, confidence 3.
+- [ ] P3 - Performance: add microbench for report/drift with synthetic 10k-row history and index tuning follow-ups. Score: impact 3, effort 3, fit 3, differentiation 2, risk 2, confidence 3.
+- [ ] P3 - Security: redact high-risk fact keys by default (`serial`, `uuid`, hardware IDs) in strict evidence profile metadata docs. Score: impact 3, effort 2, fit 4, differentiation 2, risk 1, confidence 4.
+- [ ] P3 - Developer experience: add `make smoke` target for deterministic local workflow verification. Score: impact 3, effort 2, fit 4, differentiation 1, risk 1, confidence 4.
+- [ ] P3 - Exporter parity: add Linux secure-boot fact collection and schema guidance in examples. Score: impact 3, effort 3, fit 3, differentiation 2, risk 2, confidence 3.
+- [ ] P3 - Optional read-only web dashboard for inventory/compliance/evidence verify status. Score: impact 3, effort 5, fit 3, differentiation 3, risk 3, confidence 2.
+- [ ] P3 - Packaging: provide Homebrew/Nix install docs with checksum-based release artifact verification. Score: impact 2, effort 3, fit 3, differentiation 1, risk 1, confidence 3.
 
 ## Implemented
+- [x] 2026-02-11 - Report UX for scale: add `fleetmdm report --only-assigned` to force assignment-scoped report evaluation even when no assignments exist. Evidence: `src/fleetmdm/cli.py`, `tests/test_cli.py`, `README.md`, `docs/CHANGELOG.md`.
+- [x] 2026-02-11 - Drift UX: add `fleetmdm drift --include-new-missing` and surface `change_type` (`changed|new|missing`) in drift outputs. Evidence: `src/fleetmdm/cli.py`, `tests/test_cli.py`, `README.md`, `docs/CHANGELOG.md`.
 - [x] 2026-02-10 - Release hygiene: add `fleetmdm.__main__` so `python -m fleetmdm` works; ensure `python -m fleetmdm.cli` also runs; update `make dev` and add a smoke test. Evidence: `src/fleetmdm/__main__.py`, `src/fleetmdm/cli.py`, `Makefile`, `tests/test_cli.py`.
 - [x] 2026-02-10 - Report UX: add `fleetmdm report --only-failing` and `--only-skipped` for scale/noise reduction. Evidence: `src/fleetmdm/cli.py`, `tests/test_cli.py`, `README.md`, `docs/CHANGELOG.md`.
 - [x] 2026-02-10 - CSV export hardening: use proper CSV writers and mitigate spreadsheet formula injection across CSV outputs (`check`/`report`/`history`/`drift`). Evidence: `src/fleetmdm/csvutil.py`, `src/fleetmdm/cli.py`, `src/fleetmdm/report.py`, `tests/test_cli.py`.
@@ -55,6 +63,8 @@
 - [x] 2026-02-09 - Documentation aligned with behavior changes and roadmap/changelog updates. Evidence: `README.md`, `docs/CHANGELOG.md`, `docs/ROADMAP.md`.
 
 ## Insights
+- Assignment semantics are safest when explicit: `report --only-assigned` prevents accidental “evaluate everything” behavior in large fleets that are migrating to assignment-based scoping.
+- Drift deltas are more actionable when membership changes are first-class (`new`/`missing`), not only status flips; this avoids blind spots when policies/devices appear or disappear between runs.
 - CI failures were caused by environment mismatch (`make` assumed `.venv` while workflow installed into system Python); keeping one setup path removes this class of failure.
 - Bandit was failing on both real and heuristic findings; explicit control-flow and static-query patterns keep security gate meaningful without broad suppressions.
 - Seeded/demo workflows are a high-signal smoke test and caught a real evaluation-context gap that unit tests previously missed.

@@ -1,5 +1,54 @@
 # Project Memory
 
+## 2026-02-11 - Cycle 1 - Assignment-Scoped Reporting + Drift Membership Deltas
+- Recent Decisions:
+  Ship two roadmap items together: add `fleetmdm report --only-assigned` to force assignment-scoped report evaluation, and add `fleetmdm drift --include-new-missing` to include policy/device pairs present in only one of the compared runs.
+- Why:
+  Assignment scoping protects large fleets from accidentally evaluating all policies when rollout assignments are still being staged, and drift without membership deltas misses high-signal changes when policies/devices appear or disappear between runs.
+- Gap map (bounded; local code + untrusted market scan):
+  - Missing (before this cycle): forced assignment-scoped reporting, drift membership deltas.
+  - Weak: SARIF metadata depth and per-device detail for failing policies.
+  - Parity: machine-readable outputs (`json`, `junit`, `sarif`) and assignment-aware policy resolution.
+  - Differentiator: local-first evidence export/verify pipeline with deterministic manifests and signing.
+- Evidence:
+  `src/fleetmdm/cli.py`, `tests/test_cli.py`, `README.md`, `docs/CHANGELOG.md`, `docs/ROADMAP.md`, `docs/PROJECT.md`, `CLONE_FEATURES.md`.
+- Verification Evidence:
+  `make check` (pass)
+  `make security` (pass)
+  Smoke (pass):
+  ```bash
+  tmpdir=$(mktemp -d)
+  db="$tmpdir/fleet.db"
+  .venv/bin/python -m fleetmdm init --db "$db" >/dev/null
+  .venv/bin/python -m fleetmdm seed --db "$db" >/dev/null
+  .venv/bin/python -m fleetmdm report --db "$db" --format json --only-assigned >/dev/null
+  .venv/bin/python -m fleetmdm policy assign min-os-version --device mac-001 --db "$db" >/dev/null
+  .venv/bin/python -m fleetmdm report --db "$db" --format json --only-assigned >/dev/null
+  .venv/bin/python -m fleetmdm check --db "$db" --device mac-001 --format json >/dev/null
+  .venv/bin/python -m fleetmdm check --db "$db" --device mac-001 --format json >/dev/null
+  .venv/bin/python -m fleetmdm drift --db "$db" --format json --include-new-missing >/dev/null
+  ```
+  CI triage:
+  `gh run view 21855372955 --log-failed` (pass; historical failure analyzed, root cause = Ruff import violations on old commit)
+  `gh run view 21895431235 --json status,conclusion,url` (pass; `success` on pushed feature commit)
+  Issue scan:
+  `gh issue list --state open --limit 50 --json number,title,author,url,labels,createdAt,updatedAt` (pass; no open issues from `sarveshkapre`/trusted bots)
+- Mistakes And Fixes:
+  None this cycle.
+- Commit:
+  `df40621`.
+- CI:
+  GitHub Actions run `21895431235` (success).
+- Confidence:
+  High.
+- Trust Label:
+  `trusted` (local code/tests/CI), with external references below marked `untrusted`.
+- Market scan (bounded, untrusted):
+  - Intune treats compliance reporting as a primary workflow surface. https://learn.microsoft.com/en-us/intune/intune-service/protect/compliance-policy-monitor
+  - Intune highlights monitoring devices without assigned compliance policy, reinforcing assignment-scoped visibility expectations. https://learn.microsoft.com/en-us/intune/intune-service/protect/compliance-policy-monitor-devices
+  - FleetDM public API/docs emphasize automation-ready fleet/compliance workflows and structured outputs. https://fleetdm.com/docs/rest-api/rest-api
+  - Jamf’s compliance positioning reinforces benchmark-oriented compliance visibility as expected MDM capability. https://www.jamf.com/resources/press-releases/jamf-compliance-benchmarks-help-organizations-manage-and-ensure-compliance-across-devices/
+
 ## 2026-02-10 - Cycle 2 - Python `-m` Entrypoint Parity
 - Recent Decisions:
   Add `fleetmdm.__main__` and a `fleetmdm.cli:main` entrypoint so `python -m fleetmdm` and `python -m fleetmdm.cli` execute the CLI; update `make dev` to use `python -m fleetmdm --help`; add a small smoke test.
