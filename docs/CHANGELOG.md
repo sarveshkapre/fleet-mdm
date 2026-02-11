@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased (2026-02-10)
+- Add `fleetmdm report --only-assigned` to force assignment-scoped report evaluation even when no assignments exist.
+- Add `fleetmdm drift --include-new-missing` to optionally include rows present in only one of the last two runs.
 - Add `fleetmdm report --only-failing` and `--only-skipped` for noise reduction at scale.
 - Fix CI security gate: annotate safe ElementTree usage for JUnit generation so Bandit doesn’t fail on a non-parsing import.
 - Add `fleetmdm report --policy` and `fleetmdm report --device` filters for scale/noise reduction.

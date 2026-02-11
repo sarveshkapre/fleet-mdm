@@ -207,30 +207,34 @@ def _load_devices_from_json(path: Path) -> list[dict[str, Any]]:
 
 
 def _compute_drift_changes(
-    latest: Sequence[Any], previous: Sequence[Any]
+    latest: Sequence[Any], previous: Sequence[Any], *, include_new_missing: bool = False
 ) -> list[dict[str, str]]:
-    latest_map: dict[tuple[str, str], dict[str, str]] = {}
-    for row in latest:
-        device_id = str(row["device_id"])
-        policy_id = str(row["policy_id"])
-        policy_name_value: Any = None
-        try:
-            policy_name_value = row["policy_name"]
-        except Exception:
-            policy_name_value = None
-        policy_name = "" if policy_name_value is None else str(policy_name_value)
-        latest_map[(device_id, policy_id)] = {
-            "status": str(row["status"]),
-            "policy_name": policy_name,
-        }
-    previous_map = {
-        (str(row["device_id"]), str(row["policy_id"])): str(row["status"]) for row in previous
-    }
+    def to_result_map(rows: Sequence[Any]) -> dict[tuple[str, str], dict[str, str]]:
+        result: dict[tuple[str, str], dict[str, str]] = {}
+        for row in rows:
+            device_id = str(row["device_id"])
+            policy_id = str(row["policy_id"])
+            policy_name_value: Any = None
+            try:
+                policy_name_value = row["policy_name"]
+            except Exception:
+                policy_name_value = None
+            policy_name = "" if policy_name_value is None else str(policy_name_value)
+            result[(device_id, policy_id)] = {
+                "status": str(row["status"]),
+                "policy_name": policy_name,
+            }
+        return result
+
+    latest_map = to_result_map(latest)
+    previous_map = to_result_map(previous)
 
     changes: list[dict[str, str]] = []
-    for key, current in latest_map.items():
-        previous_status = previous_map.get(key)
-        if previous_status is None or previous_status == current["status"]:
+    shared_keys = sorted(set(latest_map.keys()) & set(previous_map.keys()))
+    for key in shared_keys:
+        current = latest_map[key]
+        previous_row = previous_map[key]
+        if previous_row["status"] == current["status"]:
             continue
         device_id, policy_id = key
         changes.append(
@@ -238,10 +242,43 @@ def _compute_drift_changes(
                 "device_id": device_id,
                 "policy_id": policy_id,
                 "policy_name": current.get("policy_name", ""),
-                "previous": previous_status,
+                "previous": previous_row["status"],
                 "current": current["status"],
+                "change_type": "changed",
             }
         )
+
+    if not include_new_missing:
+        return changes
+
+    latest_only = sorted(set(latest_map.keys()) - set(previous_map.keys()))
+    for device_id, policy_id in latest_only:
+        current = latest_map[(device_id, policy_id)]
+        changes.append(
+            {
+                "device_id": device_id,
+                "policy_id": policy_id,
+                "policy_name": current.get("policy_name", ""),
+                "previous": "missing",
+                "current": current["status"],
+                "change_type": "new",
+            }
+        )
+
+    previous_only = sorted(set(previous_map.keys()) - set(latest_map.keys()))
+    for device_id, policy_id in previous_only:
+        previous_row = previous_map[(device_id, policy_id)]
+        changes.append(
+            {
+                "device_id": device_id,
+                "policy_id": policy_id,
+                "policy_name": previous_row.get("policy_name", ""),
+                "previous": previous_row["status"],
+                "current": "missing",
+                "change_type": "missing",
+            }
+        )
+
     return changes
 
 
@@ -958,6 +995,11 @@ def report(
     format: str = typer.Option("table", "--format", help="table/json/csv/junit/sarif"),
     device_id: str | None = OPT_DEVICE_OPTIONAL,
     policy_id: str | None = OPT_POLICY_ID_OPTIONAL,
+    only_assigned: bool = typer.Option(
+        False,
+        "--only-assigned",
+        help="Evaluate only assigned policies, even when no assignments exist",
+    ),
     only_failing: bool = typer.Option(
         False, "--only-failing", help="Include only policies with at least one failing device"
     ),
@@ -979,7 +1021,7 @@ def report(
     db_path = resolve_db_path(db)
     init_db(db_path)
     with connect(db_path) as conn:
-        assignment_mode = has_any_policy_assignments(conn)
+        assignment_mode = has_any_policy_assignments(conn) or only_assigned
         if normalized_policy_id:
             policy_row = get_policy(conn, normalized_policy_id)
             if policy_row is None:
@@ -1154,6 +1196,11 @@ def drift(
     policy_id: str | None = OPT_POLICY_ID_OPTIONAL,
     device_id: str | None = OPT_DEVICE_OPTIONAL,
     since: str | None = OPT_SINCE,
+    include_new_missing: bool = typer.Option(
+        False,
+        "--include-new-missing",
+        help="Include rows that are present in only one of the two runs",
+    ),
     format: str = typer.Option("table", "--format", help="table/json/csv"),
     db: str | None = OPT_DB,
 ) -> None:
@@ -1179,7 +1226,9 @@ def drift(
             policy_id=normalized_policy_id,
             device_id=normalized_device_id,
         )
-    changes = _compute_drift_changes(latest, previous)
+    changes = _compute_drift_changes(
+        latest, previous, include_new_missing=include_new_missing
+    )
 
     if format == "json":
         console.print(json.dumps(changes, indent=2))
@@ -1187,13 +1236,14 @@ def drift(
     if format == "csv":
         buffer = StringIO()
         writer = csv.writer(buffer)
-        writer.writerow(["device_id", "policy_id", "policy_name", "previous", "current"])
+        writer.writerow(["device_id", "policy_id", "policy_name", "change", "previous", "current"])
         for row in changes:
             writer.writerow(
                 [
                     csv_safe_cell(row["device_id"]),
                     csv_safe_cell(row["policy_id"]),
                     csv_safe_cell(row.get("policy_name", "")),
+                    csv_safe_cell(row.get("change_type", "changed")),
                     csv_safe_cell(row["previous"]),
                     csv_safe_cell(row["current"]),
                 ]
@@ -1204,10 +1254,11 @@ def drift(
     table = Table(title="Compliance Drift (last two runs)")
     table.add_column("Device")
     table.add_column("Policy")
+    table.add_column("Change")
     table.add_column("Previous")
     table.add_column("Current")
     if not changes:
-        table.add_row("(none)", "", "", "")
+        table.add_row("(none)", "", "", "", "")
     else:
         for row in changes:
             policy_name = (row.get("policy_name") or "").strip()
@@ -1217,7 +1268,13 @@ def drift(
                 policy_label = f"{policy_name} ({policy_id_value})"
             elif policy_name:
                 policy_label = policy_name
-            table.add_row(row["device_id"], policy_label, row["previous"], row["current"])
+            table.add_row(
+                row["device_id"],
+                policy_label,
+                row.get("change_type", "changed"),
+                row["previous"],
+                row["current"],
+            )
     console.print(table)
 
 

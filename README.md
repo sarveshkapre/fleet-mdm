@@ -77,7 +77,9 @@ fleetmdm report --format junit > report.xml
 fleetmdm report --policy disk-encryption
 fleetmdm report --only-failing
 fleetmdm report --only-skipped
+fleetmdm report --only-assigned
 fleetmdm drift --device mac-001
+fleetmdm drift --include-new-missing
 ```
 
 ### Assignments
@@ -87,6 +89,7 @@ fleetmdm drift --device mac-001
 
 Note: if any assignments exist (device or tag), `check`/`report` evaluate only assigned policies. If no
 assignments exist, all policies apply to all devices.
+Use `fleetmdm report --only-assigned` to force assignment-scoped reporting even when no assignments exist.
 
 ### Schema export
 - Inventory schema: `fleetmdm schema inventory --output inventory.schema.json`
@@ -102,6 +105,7 @@ assignments exist, all policies apply to all devices.
 - Compare last two runs since timestamp: `fleetmdm drift --since 2026-02-01T00:00:00Z`
 - Drift for a single policy: `fleetmdm drift --policy disk-encryption`
 - Drift for a single device: `fleetmdm drift --device mac-001`
+- Include rows that are only in one run: `fleetmdm drift --include-new-missing`
 
 ### Doctor
 - DB stats and health signals: `fleetmdm doctor`

@@ -723,6 +723,49 @@ def test_report_only_skipped_filters_output(tmp_path: Path) -> None:
     assert int(rows[0]["failed_count"]) == 0
 
 
+def test_report_only_assigned_forces_assignment_scope(tmp_path: Path) -> None:
+    db_path = tmp_path / "fleet.db"
+    assert runner.invoke(app, ["seed", "--db", str(db_path)]).exit_code == 0
+
+    baseline = runner.invoke(app, ["report", "--db", str(db_path), "--format", "json"])
+    assert baseline.exit_code == 0
+    baseline_rows = json.loads(baseline.stdout)
+    assert len(baseline_rows) == 1
+    assert int(baseline_rows[0]["passed_count"]) > 0
+
+    forced = runner.invoke(
+        app, ["report", "--db", str(db_path), "--format", "json", "--only-assigned"]
+    )
+    assert forced.exit_code == 0
+    forced_rows = json.loads(forced.stdout)
+    assert len(forced_rows) == 1
+    assert int(forced_rows[0]["passed_count"]) == 0
+    assert int(forced_rows[0]["failed_count"]) == 0
+
+    assigned = runner.invoke(
+        app,
+        [
+            "policy",
+            "assign",
+            "min-os-version",
+            "--device",
+            "mac-001",
+            "--db",
+            str(db_path),
+        ],
+    )
+    assert assigned.exit_code == 0
+
+    forced_after_assign = runner.invoke(
+        app, ["report", "--db", str(db_path), "--format", "json", "--only-assigned"]
+    )
+    assert forced_after_assign.exit_code == 0
+    forced_rows_after_assign = json.loads(forced_after_assign.stdout)
+    assert len(forced_rows_after_assign) == 1
+    assert int(forced_rows_after_assign[0]["passed_count"]) == 1
+    assert int(forced_rows_after_assign[0]["failed_count"]) == 0
+
+
 def test_history_since_filters_rows(tmp_path: Path) -> None:
     db_path = tmp_path / "fleet.db"
     init_db(db_path)
@@ -997,6 +1040,132 @@ def test_drift_device_filter_limits_output(tmp_path: Path) -> None:
     assert rows[0]["policy_id"] == "disk-encryption"
     assert rows[0]["previous"] == "pass"
     assert rows[0]["current"] == "fail"
+
+
+def test_drift_include_new_missing_rows(tmp_path: Path) -> None:
+    db_path = tmp_path / "fleet.db"
+    init_db(db_path)
+
+    device = {
+        "device_id": "mac-001",
+        "hostname": "studio-1",
+        "os": "macos",
+        "os_version": "14.4",
+        "serial": "C02XYZ123",
+        "last_seen": "2026-02-01T15:30:00Z",
+        "facts": {"disk": {"encrypted": True}, "cpu": {"cores": 8}},
+    }
+    shared_yaml = "\n".join(
+        [
+            "id: shared-policy",
+            "name: Shared Policy",
+            "checks:",
+            "  - key: disk.encrypted",
+            "    op: eq",
+            "    value: true",
+            "",
+        ]
+    )
+    previous_only_yaml = "\n".join(
+        [
+            "id: previous-only",
+            "name: Previous Only",
+            "checks:",
+            "  - key: cpu.cores",
+            "    op: gte",
+            "    value: 8",
+            "",
+        ]
+    )
+    latest_only_yaml = "\n".join(
+        [
+            "id: latest-only",
+            "name: Latest Only",
+            "checks:",
+            "  - key: cpu.cores",
+            "    op: gte",
+            "    value: 12",
+            "",
+        ]
+    )
+
+    with connect(db_path) as conn:
+        ingest_devices(conn, [device])
+        add_policy(conn, "shared-policy", "Shared Policy", None, shared_yaml)
+        add_policy(conn, "previous-only", "Previous Only", None, previous_only_yaml)
+        add_policy(conn, "latest-only", "Latest Only", None, latest_only_yaml)
+
+        run1 = create_compliance_run(conn, started_at="2026-02-01T00:00:00Z")
+        add_compliance_result(
+            conn,
+            run1,
+            "mac-001",
+            "shared-policy",
+            "Shared Policy",
+            "pass",
+            "",
+            checked_at="2026-02-01T00:00:00Z",
+        )
+        add_compliance_result(
+            conn,
+            run1,
+            "mac-001",
+            "previous-only",
+            "Previous Only",
+            "pass",
+            "",
+            checked_at="2026-02-01T00:00:00Z",
+        )
+
+        run2 = create_compliance_run(conn, started_at="2026-02-03T00:00:00Z")
+        add_compliance_result(
+            conn,
+            run2,
+            "mac-001",
+            "shared-policy",
+            "Shared Policy",
+            "pass",
+            "",
+            checked_at="2026-02-03T00:00:00Z",
+        )
+        add_compliance_result(
+            conn,
+            run2,
+            "mac-001",
+            "latest-only",
+            "Latest Only",
+            "fail",
+            "cpu.cores",
+            checked_at="2026-02-03T00:00:00Z",
+        )
+
+    default = runner.invoke(app, ["drift", "--db", str(db_path), "--format", "json"])
+    assert default.exit_code == 0
+    assert json.loads(default.stdout) == []
+
+    result = runner.invoke(
+        app,
+        [
+            "drift",
+            "--db",
+            str(db_path),
+            "--format",
+            "json",
+            "--include-new-missing",
+        ],
+    )
+    assert result.exit_code == 0
+    rows = json.loads(result.stdout)
+    assert len(rows) == 2
+
+    by_policy = {row["policy_id"]: row for row in rows}
+    assert by_policy["latest-only"]["change_type"] == "new"
+    assert by_policy["latest-only"]["previous"] == "missing"
+    assert by_policy["latest-only"]["current"] == "fail"
+
+    assert by_policy["previous-only"]["change_type"] == "missing"
+    assert by_policy["previous-only"]["previous"] == "pass"
+    assert by_policy["previous-only"]["current"] == "missing"
 
 
 def test_doctor_json_includes_db_stats(tmp_path: Path) -> None:
