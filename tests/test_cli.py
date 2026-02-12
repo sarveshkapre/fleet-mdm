@@ -41,6 +41,99 @@ def test_script_list_initializes_database(tmp_path: Path) -> None:
     assert db_path.exists()
 
 
+def test_init_uses_configured_db_default(tmp_path: Path) -> None:
+    config_path = tmp_path / "fleet-config.yaml"
+    db_path = tmp_path / "config-default.db"
+    config_path.write_text(f"db: {db_path}\n", encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        ["init"],
+        env={"FLEETMDM_CONFIG": str(config_path)},
+    )
+    assert result.exit_code == 0
+    assert db_path.exists()
+
+
+def test_report_uses_config_defaults_and_cli_override(tmp_path: Path) -> None:
+    config_path = tmp_path / "fleet-config.yaml"
+    db_path = tmp_path / "fleet.db"
+    policy_path = tmp_path / "policy.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                f"db: {db_path}",
+                "report:",
+                "  format: json",
+                "  sort_by: failed",
+                "  top: 1",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    policy_path.write_text(
+        "\n".join(
+            [
+                "id: disk-encryption",
+                "name: Disk Encryption Enabled",
+                "checks:",
+                "  - key: disk.encrypted",
+                "    op: eq",
+                "    value: true",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    env = {"FLEETMDM_CONFIG": str(config_path)}
+
+    assert runner.invoke(app, ["seed"], env=env).exit_code == 0
+    assert runner.invoke(app, ["policy", "add", str(policy_path)], env=env).exit_code == 0
+
+    from_config = runner.invoke(app, ["report"], env=env)
+    assert from_config.exit_code == 0
+    rows = json.loads(from_config.stdout)
+    assert len(rows) == 1
+
+    with_override = runner.invoke(app, ["report", "--format", "json", "--top", "0"], env=env)
+    assert with_override.exit_code == 0
+    override_rows = json.loads(with_override.stdout)
+    assert len(override_rows) == 2
+
+
+def test_evidence_export_uses_config_defaults(tmp_path: Path) -> None:
+    config_path = tmp_path / "fleet-config.yaml"
+    db_path = tmp_path / "fleet.db"
+    output_dir = tmp_path / "evidence-default"
+    config_path.write_text(
+        "\n".join(
+            [
+                f"db: {db_path}",
+                "evidence_export:",
+                f"  output: {output_dir}",
+                "  redaction_profile: strict",
+                "  history_limit: 1",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    env = {"FLEETMDM_CONFIG": str(config_path)}
+
+    assert runner.invoke(app, ["seed"], env=env).exit_code == 0
+    assert runner.invoke(app, ["check", "--device", "mac-001"], env=env).exit_code == 0
+
+    export = runner.invoke(app, ["evidence", "export"], env=env)
+    assert export.exit_code == 0
+    assert output_dir.exists()
+
+    metadata = json.loads((output_dir / "metadata.json").read_text(encoding="utf-8"))
+    assert metadata["redaction_profile"] == "strict"
+    assert metadata["history_excerpt_limit"] == 1
+    assert metadata["history_excerpt_count"] == 1
+
+
 def test_evidence_export_writes_artifacts(tmp_path: Path) -> None:
     db_path = tmp_path / "fleet.db"
     output_dir = tmp_path / "evidence"

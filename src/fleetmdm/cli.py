@@ -1920,6 +1920,7 @@ def evidence_keygen(
 
 @evidence_app.command("export")
 def evidence_export(
+    ctx: typer.Context,
     output: Path | None = OPT_EVIDENCE_OUTPUT,
     redaction_profile: str = OPT_REDACT_PROFILE,
     redact_config: Path | None = OPT_REDACT_CONFIG,
@@ -1928,8 +1929,18 @@ def evidence_export(
     db: str | None = OPT_DB,
 ) -> None:
     """Export a SOC-style evidence bundle as JSON artifacts."""
+    (
+        resolved_output,
+        resolved_redaction_profile,
+        resolved_history_limit,
+    ) = _resolve_evidence_export_defaults(
+        output=output,
+        redaction_profile=redaction_profile,
+        history_limit=history_limit,
+        ctx=ctx,
+    )
     try:
-        profile = _normalize_redaction_profile(redaction_profile)
+        profile = _normalize_redaction_profile(resolved_redaction_profile)
     except ValueError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=2) from exc
@@ -1942,10 +1953,10 @@ def evidence_export(
             console.print(f"[red]{exc}[/red]")
             raise typer.Exit(code=2) from exc
 
-    db_path = resolve_db_path(db)
+    db_path = _resolve_db_path_with_defaults(db)
     init_db(db_path)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    output_dir = output or Path(f"fleetmdm-evidence-{stamp}")
+    output_dir = resolved_output or Path(f"fleetmdm-evidence-{stamp}")
     output_dir.mkdir(parents=True, exist_ok=True)
 
     generated_at = datetime.now(timezone.utc).isoformat()
@@ -2000,9 +2011,9 @@ def evidence_export(
                 previous_run_id = str(runs[1]["run_id"])
                 previous_results = list_results_for_run(conn, previous_run_id)
                 drift_changes = _compute_drift_changes(latest_results, previous_results)
-        if history_limit > 0:
+        if resolved_history_limit > 0:
             history_excerpt = [
-                dict(row) for row in list_compliance_history(conn, None, None, history_limit)
+                dict(row) for row in list_compliance_history(conn, None, None, resolved_history_limit)
             ]
 
     (
@@ -2027,13 +2038,13 @@ def evidence_export(
     elif profile == "strict":
         policies_raw_yaml = "redacted"
 
-    total_artifacts = 7 + (1 if history_limit > 0 else 0) + (1 if signing_key_file else 0)
+    total_artifacts = 7 + (1 if resolved_history_limit > 0 else 0) + (1 if signing_key_file else 0)
     metadata = {
         "generated_at": generated_at,
         "db_path": str(db_path),
         "redaction_profile": profile,
         "policies_raw_yaml": policies_raw_yaml,
-        "history_excerpt_limit": history_limit,
+        "history_excerpt_limit": resolved_history_limit,
         "history_excerpt_count": len(redacted_history_excerpt),
         "facts_redaction": (
             None
@@ -2058,7 +2069,7 @@ def evidence_export(
         "latest_run.json": redacted_latest_run,
         "drift.json": redacted_drift_changes,
     }
-    if history_limit > 0:
+    if resolved_history_limit > 0:
         artifacts["history.json"] = redacted_history_excerpt
     for name, payload in artifacts.items():
         _write_json_artifact(output_dir / name, payload)
@@ -2073,7 +2084,7 @@ def evidence_export(
         _write_json_artifact(output_dir / "signature.json", signature)
 
     message = f"Wrote evidence pack to {output_dir} (redaction={profile})"
-    if history_limit > 0:
+    if resolved_history_limit > 0:
         message += f", history={len(redacted_history_excerpt)}"
     if signing_key_file:
         message += ", signed"
