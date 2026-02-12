@@ -51,9 +51,9 @@
 
 ## 2026-02-12 - Cycle 1 - Delivery: Report Triage + Since Validation + Smoke Target
 - Recent Decisions:
-  - 2026-02-12 | Add `report --sort-by name|failed|passed` and `--top N` for deterministic triage ranking/slicing | Large fleets need quick focus on highest-failure policies and bounded summaries | Evidence: `src/fleetmdm/cli.py`, `tests/test_cli.py`, `README.md`, `docs/CHANGELOG.md` | Commit: pending | Confidence: high | Trust label: `trusted`.
-  - 2026-02-12 | Validate malformed `--since` in `history` and `drift` via CLI-level normalization with explicit exit code `2` | Prevent traceback-style failures and provide predictable automation behavior | Evidence: `src/fleetmdm/cli.py`, `tests/test_cli.py`, `README.md` | Commit: pending | Confidence: high | Trust label: `trusted`.
-  - 2026-02-12 | Add deterministic `make smoke` workflow that executes `init`/`seed`/`report`/`check`/`history`/`drift` | Create a repeatable local production-readiness smoke path tied to touched workflows | Evidence: `Makefile`, `docs/PROJECT.md`, `README.md` | Commit: pending | Confidence: high | Trust label: `trusted`.
+  - 2026-02-12 | Add `report --sort-by name|failed|passed` and `--top N` for deterministic triage ranking/slicing | Large fleets need quick focus on highest-failure policies and bounded summaries | Evidence: `src/fleetmdm/cli.py`, `tests/test_cli.py`, `README.md`, `docs/CHANGELOG.md` | Commit: `6709c95` | Confidence: high | Trust label: `trusted`.
+  - 2026-02-12 | Validate malformed `--since` in `history` and `drift` via CLI-level normalization with explicit exit code `2` | Prevent traceback-style failures and provide predictable automation behavior | Evidence: `src/fleetmdm/cli.py`, `tests/test_cli.py`, `README.md` | Commit: `6709c95` | Confidence: high | Trust label: `trusted`.
+  - 2026-02-12 | Add deterministic `make smoke` workflow that executes `init`/`seed`/`report`/`check`/`history`/`drift` | Create a repeatable local production-readiness smoke path tied to touched workflows | Evidence: `Makefile`, `docs/PROJECT.md`, `README.md` | Commit: `6709c95` | Confidence: high | Trust label: `trusted`.
 - Anti-Drift Checks:
   - Confirmed scope remained aligned to locked cycle list only (report triage UX, `--since` reliability, smoke verification path).
   - Deferred non-locked candidates (SARIF enrichment, evidence history excerpts, doctor maintenance flags) back to backlog.
