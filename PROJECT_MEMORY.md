@@ -13,6 +13,85 @@
   - Highest pending parity features: SARIF metadata enrichment and bounded evidence history excerpts.
   - Reliability follow-up: unify error-code/message behavior across all command `--format` and input-validation paths.
 
+## 2026-02-12 - Session Notes Checkpoint (Cycle 1, Session 2, pre-implementation)
+- Goal:
+  Ship the highest-impact pending M3 parity work by improving SARIF report fidelity and adding bounded history excerpts to evidence bundles.
+- Success Criteria:
+  - `report --format sarif` includes richer policy metadata and supports bounded failed-device detail output.
+  - `evidence export` can emit optional bounded `history.json` excerpts.
+  - Local verification gates pass (`make check`, `make security`, `make smoke`) plus targeted smoke paths for the new flags.
+  - `PRODUCT_ROADMAP.md`, `CLONE_FEATURES.md`, and `README.md` stay aligned with behavior.
+- Non-goals:
+  - Optional dashboard work.
+  - Config defaults file support.
+  - Doctor integrity/vacuum automation.
+- Planned Tasks (Locked):
+  - Add SARIF rule metadata depth and per-policy failed-device cap support, with regression tests.
+  - Add evidence export `--history-limit` with bounded excerpt artifact and redaction-consistent behavior, with tests.
+  - Update docs/trackers and verification evidence.
+- Product Phase Checkpoint:
+  - Are we in a good product phase yet? `No`.
+  - Highest-value missing parity features this session: SARIF metadata/depth and evidence history excerpts.
+- Pending Features Review:
+  - Still pending (from `PRODUCT_ROADMAP.md` + `CLONE_FEATURES.md`): doctor integrity guidance, config defaults, security default redaction hardening, exporter parity, performance benchmark, packaging docs, optional dashboard.
+- Market scan (bounded, untrusted):
+  - Intune compliance monitoring + drill-down workflows: https://learn.microsoft.com/en-us/intune/intune-service/protect/compliance-policy-monitor
+  - Intune export APIs for filtered reporting automation: https://learn.microsoft.com/en-us/intune/intune-service/fundamentals/reports-export-graph-apis
+  - Kandji reporting/filter workflow reference: https://support.kandji.io/kb/create-custom-reports-with-managed-devices-by-blueprint-and-tag
+  - FleetDM compliance dashboard expectations: https://fleetdm.com/docs/using-fleet/mdm/compliance-dashboard
+- Trust Label:
+  `trusted` for local repo state and planned tasks, `untrusted` for external market references.
+
+## 2026-02-12 - Cycle 1 - SARIF Metadata Depth + Evidence History Excerpts
+- Recent Decisions:
+  Ship the two highest-impact pending parity items together: (1) SARIF metadata depth + bounded per-policy failed-device context, and (2) optional bounded history excerpts in evidence exports.
+- Why:
+  SARIF scanners and compliance tooling need richer rule metadata and controlled detail payloads; auditors need recent history context inside evidence packs without exporting the full database.
+- Gap map (bounded; local code + untrusted market scan):
+  - Missing (before this cycle): SARIF metadata depth/per-device context cap; bounded evidence history excerpts.
+  - Weak: doctor integrity/maintenance guidance and config defaults ergonomics.
+  - Parity: report filtering/sorting, assignment-aware evaluation, machine-readable outputs, evidence verify/signing/key lifecycle.
+  - Differentiator: local-first evidence trust pipeline (manifest/signature/verify) with optional history context.
+- Evidence:
+  `src/fleetmdm/report.py`, `src/fleetmdm/cli.py`, `tests/test_cli.py`, `README.md`, `docs/CHANGELOG.md`, `docs/ROADMAP.md`, `docs/PROJECT.md`, `PRODUCT_ROADMAP.md`, `CLONE_FEATURES.md`.
+- Verification Evidence:
+  `make check` (fail: `build` step could not install `hatchling>=1.24.0` due offline DNS/network in sandbox)
+  `make security` (fail: `pip_audit` attempted to access non-writable `~/.pip-audit-cache` path in sandbox)
+  `.venv/bin/python -m bandit -q -r src` (pass)
+  `.venv/bin/python -m pip_audit --cache-dir /tmp/pip-audit-cache` (fail: offline DNS resolution to `pypi.org`)
+  `make smoke` (pass)
+  `.venv/bin/python -m pytest tests/test_cli.py -k "sarif or evidence_export_history_excerpt"` (pass)
+  Targeted smoke (pass):
+  ```bash
+  tmpdir=$(mktemp -d)
+  db="$tmpdir/fleet.db"
+  .venv/bin/python -m fleetmdm seed --db "$db" >/dev/null
+  cat > "$tmpdir/policy.yaml" <<'YAML'
+  id: cpu-min
+  name: CPU Minimum 64 Cores
+  description: Require at least 64 CPU cores
+  checks:
+    - key: cpu.cores
+      op: gte
+      value: 64
+  YAML
+  .venv/bin/python -m fleetmdm policy add "$tmpdir/policy.yaml" --db "$db" >/dev/null
+  .venv/bin/python -m fleetmdm report --db "$db" --format sarif --sarif-max-failures-per-policy 1 > "$tmpdir/report.sarif"
+  .venv/bin/python -m fleetmdm check --db "$db" --device mac-001 >/dev/null
+  .venv/bin/python -m fleetmdm check --db "$db" --device linux-001 >/dev/null
+  .venv/bin/python -m fleetmdm evidence export --db "$db" --output "$tmpdir/evidence" --history-limit 2 --redact-profile strict >/dev/null
+  .venv/bin/python -m fleetmdm evidence verify "$tmpdir/evidence" >/dev/null
+  ```
+- Mistakes And Fixes:
+  - Environment constraint: `pip_audit` default cache path was not writable inside sandbox.
+  - Remediation: run `pip_audit` with explicit writable cache dir (`--cache-dir /tmp/pip-audit-cache`) and record offline-network limitation separately.
+- Commit:
+  `a61da2c`.
+- Confidence:
+  High on feature behavior and tests; medium on full release gate due network-restricted build/security dependency resolution.
+- Trust Label:
+  `trusted` for local edits/tests/smoke, `untrusted` for external references.
+
 ## 2026-02-11 - Cycle 1 - Assignment-Scoped Reporting + Drift Membership Deltas
 - Recent Decisions:
   Ship two roadmap items together: add `fleetmdm report --only-assigned` to force assignment-scoped report evaluation, and add `fleetmdm drift --include-new-missing` to include policy/device pairs present in only one of the compared runs.
