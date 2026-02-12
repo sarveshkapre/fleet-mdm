@@ -1394,3 +1394,277 @@ def test_doctor_json_includes_db_stats(tmp_path: Path) -> None:
     assert payload["db_path"].endswith("fleet.db")
     assert payload["tables"]["devices"] == 0
     assert "idx_compliance_runs_started_at" in payload["indexes"]
+
+
+def test_doctor_integrity_check_and_vacuum_json_output(tmp_path: Path) -> None:
+    db_path = tmp_path / "fleet.db"
+    assert runner.invoke(app, ["seed", "--db", str(db_path)]).exit_code == 0
+
+    with connect(db_path) as conn:
+        conn.execute("CREATE TABLE IF NOT EXISTS scratch(data TEXT)")
+        for _ in range(300):
+            conn.execute("INSERT INTO scratch(data) VALUES (?)", ("x" * 2048,))
+        conn.execute("DELETE FROM scratch")
+
+    result = runner.invoke(
+        app,
+        [
+            "doctor",
+            "--db",
+            str(db_path),
+            "--format",
+            "json",
+            "--integrity-check",
+            "--vacuum",
+        ],
+    )
+    assert result.exit_code == 0
+
+    payload = json.loads(result.stdout)
+    assert payload["maintenance"]["integrity_check"]["requested"] is True
+    assert payload["maintenance"]["integrity_check"]["ok"] is True
+    assert payload["maintenance"]["integrity_check"]["messages"]
+    assert payload["maintenance"]["vacuum"]["requested"] is True
+    assert payload["maintenance"]["vacuum"]["executed"] is True
+    assert (
+        payload["maintenance"]["vacuum"]["freelist_count_after"]
+        <= payload["maintenance"]["vacuum"]["freelist_count_before"]
+    )
+    assert (
+        payload["maintenance"]["vacuum"]["db_size_bytes_after"]
+        <= payload["maintenance"]["vacuum"]["db_size_bytes_before"]
+    )
+
+
+def test_config_defaults_apply_to_db_report_and_evidence_export(tmp_path: Path) -> None:
+    db_path = tmp_path / "configured.db"
+    evidence_dir = tmp_path / "configured-evidence"
+    config_path = tmp_path / "fleetmdm-config.yml"
+    config_path.write_text(
+        "\n".join(
+            [
+                f"db: {db_path}",
+                "report:",
+                "  format: json",
+                "  sort_by: failed",
+                "  top: 1",
+                "evidence_export:",
+                f"  output: {evidence_dir}",
+                "  redaction_profile: strict",
+                "  history_limit: 1",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    env = {"FLEETMDM_CONFIG": str(config_path)}
+
+    seed = runner.invoke(app, ["seed"], env=env)
+    assert seed.exit_code == 0
+    assert db_path.exists()
+
+    check = runner.invoke(app, ["check", "--device", "mac-001"], env=env)
+    assert check.exit_code == 0
+
+    report = runner.invoke(app, ["report"], env=env)
+    assert report.exit_code == 0
+    rows = json.loads(report.stdout)
+    assert len(rows) == 1
+
+    export = runner.invoke(app, ["evidence", "export"], env=env)
+    assert export.exit_code == 0
+    assert evidence_dir.exists()
+    metadata = json.loads((evidence_dir / "metadata.json").read_text(encoding="utf-8"))
+    assert metadata["redaction_profile"] == "strict"
+    assert metadata["history_excerpt_limit"] == 1
+    assert (evidence_dir / "history.json").exists()
+
+
+def test_command_line_options_override_config_defaults(tmp_path: Path) -> None:
+    db_path = tmp_path / "configured.db"
+    config_output = tmp_path / "config-output"
+    override_output = tmp_path / "override-output"
+    config_path = tmp_path / "fleetmdm-config.yml"
+    config_path.write_text(
+        "\n".join(
+            [
+                f"db: {db_path}",
+                "report:",
+                "  format: json",
+                "evidence_export:",
+                f"  output: {config_output}",
+                "  redaction_profile: strict",
+                "  history_limit: 1",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    env = {"FLEETMDM_CONFIG": str(config_path)}
+
+    assert runner.invoke(app, ["seed"], env=env).exit_code == 0
+
+    report = runner.invoke(app, ["report", "--format", "csv"], env=env)
+    assert report.exit_code == 0
+    assert report.stdout.splitlines()[0] == "policy_id,policy_name,passed,failed"
+
+    export = runner.invoke(
+        app,
+        [
+            "evidence",
+            "export",
+            "--output",
+            str(override_output),
+            "--redact-profile",
+            "none",
+            "--history-limit",
+            "0",
+        ],
+        env=env,
+    )
+    assert export.exit_code == 0
+    assert (override_output / "metadata.json").exists()
+    assert not (config_output / "metadata.json").exists()
+
+
+def test_report_rejects_invalid_report_defaults_config(tmp_path: Path) -> None:
+    config_path = tmp_path / "fleetmdm-config.yml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "report:",
+                "  - not-a-mapping",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    env = {"FLEETMDM_CONFIG": str(config_path)}
+
+    result = runner.invoke(app, ["report"], env=env)
+    assert result.exit_code == 2
+    assert "Invalid config value for 'report': expected a mapping" in result.stdout
+
+
+def test_core_commands_reject_invalid_format_consistently(tmp_path: Path) -> None:
+    db_path = tmp_path / "fleet.db"
+    cases = [
+        (["check", "--db", str(db_path), "--format", "invalid"], "table, json, csv"),
+        (
+            ["report", "--db", str(db_path), "--format", "invalid"],
+            "table, json, csv, junit, sarif",
+        ),
+        (["history", "--db", str(db_path), "--format", "invalid"], "table, json, csv"),
+        (["drift", "--db", str(db_path), "--format", "invalid"], "table, json, csv"),
+        (["doctor", "--db", str(db_path), "--format", "invalid"], "table, json"),
+    ]
+    for args, expected_values in cases:
+        result = runner.invoke(app, args)
+        assert result.exit_code == 2
+        assert "Invalid --format value. Expected one of:" in result.stdout
+        assert expected_values in result.stdout
+        assert "Traceback" not in result.stdout
+
+
+def test_evidence_verify_rejects_invalid_format_value(tmp_path: Path) -> None:
+    bundle_dir = tmp_path / "bundle"
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+
+    result = runner.invoke(
+        app, ["evidence", "verify", str(bundle_dir), "--format", "invalid"]
+    )
+    assert result.exit_code == 2
+    assert "Invalid --format value. Expected one of: text, json" in result.stdout
+
+
+def test_policy_assignments_unmatched_tags_lists_stale_assignments(tmp_path: Path) -> None:
+    db_path = tmp_path / "fleet.db"
+    assert runner.invoke(app, ["seed", "--db", str(db_path)]).exit_code == 0
+    with connect(db_path) as conn:
+        ingest_devices(
+            conn,
+            [
+                {
+                    "device_id": "mac-001",
+                    "hostname": "studio-1",
+                    "os": "macos",
+                    "os_version": "14.4",
+                    "serial": "C02XYZ123",
+                    "last_seen": "2026-02-13T00:00:00Z",
+                    "facts": {
+                        "disk": {"encrypted": True},
+                        "cpu": {"cores": 8},
+                        "tags": ["prod"],
+                    },
+                }
+            ],
+        )
+    assert (
+        runner.invoke(
+            app,
+            ["policy", "assign", "min-os-version", "--tag", "prod", "--db", str(db_path)],
+        ).exit_code
+        == 0
+    )
+    assert (
+        runner.invoke(
+            app,
+            ["policy", "assign", "min-os-version", "--tag", "stale-tag", "--db", str(db_path)],
+        ).exit_code
+        == 0
+    )
+
+    result = runner.invoke(
+        app,
+        ["policy", "assignments", "--unmatched-tags", "--db", str(db_path)],
+    )
+    assert result.exit_code == 0
+    assert "stale-tag" in result.stdout
+    assert "min-os-version" in result.stdout
+    assert "prod" not in result.stdout
+
+
+def test_policy_assignments_unmatched_tags_rejects_device_or_tag_filters(tmp_path: Path) -> None:
+    db_path = tmp_path / "fleet.db"
+    assert runner.invoke(app, ["seed", "--db", str(db_path)]).exit_code == 0
+
+    with_tag = runner.invoke(
+        app,
+        [
+            "policy",
+            "assignments",
+            "--unmatched-tags",
+            "--tag",
+            "prod",
+            "--db",
+            str(db_path),
+        ],
+    )
+    assert with_tag.exit_code == 2
+    assert "--unmatched-tags cannot be combined" in with_tag.stdout
+
+    with_device = runner.invoke(
+        app,
+        [
+            "policy",
+            "assignments",
+            "--unmatched-tags",
+            "--device",
+            "mac-001",
+            "--db",
+            str(db_path),
+        ],
+    )
+    assert with_device.exit_code == 2
+    assert "--unmatched-tags cannot be combined" in with_device.stdout
+
+
+def test_evidence_key_list_rejects_invalid_format_value(tmp_path: Path) -> None:
+    keyring_dir = tmp_path / "keys"
+    keyring_dir.mkdir(parents=True, exist_ok=True)
+    result = runner.invoke(
+        app,
+        ["evidence", "key", "list", "--keyring-dir", str(keyring_dir), "--format", "invalid"],
+    )
+    assert result.exit_code == 2
+    assert "Invalid --format value. Expected one of: table, json" in result.stdout

@@ -208,6 +208,15 @@ def _policy_name_map(conn: sqlite3.Connection) -> dict[str, str]:
     return {str(row["policy_id"]): str(row["name"]) for row in list_policies(conn)}
 
 
+def _device_tags_by_id(conn: sqlite3.Connection) -> dict[str, list[str]]:
+    tags_by_device: dict[str, list[str]] = {}
+    for row in list_devices(conn):
+        device_id = str(row["device_id"])
+        facts = get_device_facts(conn, device_id) or {}
+        tags_by_device[device_id] = _extract_device_tags(facts)
+    return tags_by_device
+
+
 def _load_devices_from_json(path: Path) -> list[dict[str, Any]]:
     return load_inventory_json(path)
 
@@ -464,6 +473,67 @@ def _normalize_since_option(value: str | None) -> str | None:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc).isoformat()
+
+
+def _normalize_choice_option(value: str, option_name: str, allowed: Sequence[str]) -> str:
+    normalized = str(value).strip().lower()
+    allowed_values = [str(item).strip().lower() for item in allowed if str(item).strip()]
+    if normalized not in allowed_values:
+        console.print(
+            f"Invalid {option_name} value. Expected one of: "
+            f"{', '.join(allowed_values)}"
+        )
+        raise typer.Exit(code=2)
+    return normalized
+
+
+def _doctor_snapshot(conn: sqlite3.Connection) -> dict[str, Any]:
+    sqlite_version = str(conn.execute("SELECT sqlite_version()").fetchone()[0])
+    page_size = int(conn.execute("PRAGMA page_size").fetchone()[0])
+    page_count = int(conn.execute("PRAGMA page_count").fetchone()[0])
+    freelist_count = int(conn.execute("PRAGMA freelist_count").fetchone()[0])
+    journal_mode = str(conn.execute("PRAGMA journal_mode").fetchone()[0])
+    synchronous = str(conn.execute("PRAGMA synchronous").fetchone()[0])
+
+    tables = {
+        "devices": int(conn.execute("SELECT COUNT(*) FROM devices").fetchone()[0]),
+        "device_facts": int(conn.execute("SELECT COUNT(*) FROM device_facts").fetchone()[0]),
+        "policies": int(conn.execute("SELECT COUNT(*) FROM policies").fetchone()[0]),
+        "policy_assignments": int(
+            conn.execute("SELECT COUNT(*) FROM policy_assignments").fetchone()[0]
+        ),
+        "policy_tag_assignments": int(
+            conn.execute("SELECT COUNT(*) FROM policy_tag_assignments").fetchone()[0]
+        ),
+        "scripts": int(conn.execute("SELECT COUNT(*) FROM scripts").fetchone()[0]),
+        "compliance_runs": int(conn.execute("SELECT COUNT(*) FROM compliance_runs").fetchone()[0]),
+        "compliance_results": int(
+            conn.execute("SELECT COUNT(*) FROM compliance_results").fetchone()[0]
+        ),
+    }
+    indexes = [
+        str(row["name"])
+        for row in conn.execute(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'index' AND name NOT LIKE 'sqlite_%'
+            ORDER BY name
+            """
+        ).fetchall()
+    ]
+    return {
+        "sqlite_version": sqlite_version,
+        "pragmas": {
+            "page_size": page_size,
+            "page_count": page_count,
+            "freelist_count": freelist_count,
+            "journal_mode": journal_mode,
+            "synchronous": synchronous,
+        },
+        "tables": tables,
+        "indexes": indexes,
+    }
 
 
 def _keyring_manifest_path(keyring_dir: Path) -> Path:
@@ -835,10 +905,18 @@ def policy_unassign(
 def policy_assignments(
     device_id: str | None = OPT_DEVICE_OPTIONAL,
     tag: str | None = typer.Option(None, "--tag", help="Show assignments for a tag"),
+    unmatched_tags: bool = typer.Option(
+        False,
+        "--unmatched-tags",
+        help="Show tag assignments that currently match zero devices",
+    ),
     db: str | None = OPT_DB,
 ) -> None:
-    """Show policy assignments for a device or tag."""
-    if (device_id is None) == (tag is None):
+    """Show policy assignments for a device, tag, or stale tag assignments."""
+    if unmatched_tags and (device_id is not None or tag is not None):
+        console.print("[red]--unmatched-tags cannot be combined with --device or --tag[/red]")
+        raise typer.Exit(code=2)
+    if not unmatched_tags and (device_id is None) == (tag is None):
         console.print("Provide exactly one of --device or --tag")
         raise typer.Exit(code=2)
 
@@ -846,6 +924,42 @@ def policy_assignments(
     init_db(db_path)
     with connect(db_path) as conn:
         name_map = _policy_name_map(conn)
+        if unmatched_tags:
+            tags_by_device = _device_tags_by_id(conn)
+            known_tags = {tag_name for tags in tags_by_device.values() for tag_name in tags}
+
+            stale_rows: list[dict[str, str]] = []
+            for row in list_all_policy_tag_assignments(conn):
+                policy_id_value = str(row["policy_id"])
+                assigned_tag = _normalize_tag(str(row["tag"]))
+                if assigned_tag in known_tags:
+                    continue
+                stale_rows.append(
+                    {
+                        "tag": assigned_tag,
+                        "policy_id": policy_id_value,
+                        "policy_name": name_map.get(policy_id_value, ""),
+                    }
+                )
+
+            table = Table(title="Unmatched Tag Assignments")
+            table.add_column("Tag")
+            table.add_column("Policy ID")
+            table.add_column("Name")
+            if stale_rows:
+                for row in sorted(
+                    stale_rows,
+                    key=lambda item: (
+                        item["tag"].casefold(),
+                        item["policy_id"].casefold(),
+                    ),
+                ):
+                    table.add_row(row["tag"], row["policy_id"], row["policy_name"])
+            else:
+                table.add_row("(none)", "", "")
+            console.print(table)
+            return
+
         if tag is not None:
             normalized_tag = _normalize_tag(tag)
             if not normalized_tag:
@@ -918,6 +1032,11 @@ def check(
     db: str | None = OPT_DB,
 ) -> None:
     """Evaluate compliance."""
+    normalized_format = _normalize_choice_option(
+        format,
+        "--format",
+        ("table", "json", "csv"),
+    )
     db_path = resolve_db_path(db)
     init_db(db_path)
     with connect(db_path) as conn:
@@ -995,13 +1114,13 @@ def check(
         console.print("No policies to evaluate")
         raise typer.Exit(code=1)
 
-    if format == "table":
+    if normalized_format == "table":
         if len(results_payload) > 1:
             console.print("Table format requires --device")
             raise typer.Exit(code=1)
         console.print(render_table(results_payload[0]["results"]))
         return
-    if format == "json":
+    if normalized_format == "json":
         payload = []
         for entry in results_payload:
             payload.append(
@@ -1012,7 +1131,7 @@ def check(
             )
         console.print(json.dumps(payload, indent=2))
         return
-    if format == "csv":
+    if normalized_format == "csv":
         buffer = StringIO()
         writer = csv.writer(buffer)
         writer.writerow(["device_id", "policy_id", "policy_name", "status", "failed_checks"])
@@ -1031,8 +1150,6 @@ def check(
                 )
         console.print(buffer.getvalue().rstrip("\n"))
         return
-    console.print(f"Unknown format: {format}")
-    raise typer.Exit(code=1)
 
 
 @app.command()
@@ -1066,6 +1183,11 @@ def report(
     db: str | None = OPT_DB,
 ) -> None:
     """Summary compliance report across devices."""
+    normalized_format = _normalize_choice_option(
+        format,
+        "--format",
+        ("table", "json", "csv", "junit", "sarif"),
+    )
     normalized_sort_by = (sort_by or "").strip().lower()
     if normalized_sort_by not in {"name", "failed", "passed"}:
         console.print("Invalid --sort-by value. Expected one of: name, failed, passed")
@@ -1187,10 +1309,10 @@ def report(
     if top > 0:
         filtered = filtered[:top]
 
-    if format == "json":
+    if normalized_format == "json":
         console.print(json.dumps(filtered, indent=2))
         return
-    if format == "csv":
+    if normalized_format == "csv":
         buffer = StringIO()
         writer = csv.writer(buffer)
         writer.writerow(["policy_id", "policy_name", "passed", "failed"])
@@ -1205,10 +1327,10 @@ def report(
             )
         console.print(buffer.getvalue().rstrip("\n"))
         return
-    if format == "junit":
+    if normalized_format == "junit":
         typer.echo(render_junit_summary(filtered), nl=False)
         return
-    if format == "sarif":
+    if normalized_format == "sarif":
         sarif_rows: list[dict[str, Any]] = []
         for row in filtered:
             context = sarif_context.get(str(row["policy_id"]), {})
@@ -1246,16 +1368,21 @@ def history(
     db: str | None = OPT_DB,
 ) -> None:
     """Show compliance history."""
+    normalized_format = _normalize_choice_option(
+        format,
+        "--format",
+        ("table", "json", "csv"),
+    )
     normalized_since = _normalize_since_option(since)
     db_path = resolve_db_path(db)
     init_db(db_path)
     with connect(db_path) as conn:
         rows = list_compliance_history(conn, device_id, policy_id, limit, since=normalized_since)
 
-    if format == "json":
+    if normalized_format == "json":
         console.print(json.dumps([dict(row) for row in rows], indent=2))
         return
-    if format == "csv":
+    if normalized_format == "csv":
         buffer = StringIO()
         writer = csv.writer(buffer)
         writer.writerow(
@@ -1317,6 +1444,11 @@ def drift(
     db: str | None = OPT_DB,
 ) -> None:
     """Compare the last two compliance runs and show status changes."""
+    normalized_format = _normalize_choice_option(
+        format,
+        "--format",
+        ("table", "json", "csv"),
+    )
     normalized_policy_id = (policy_id or "").strip() or None
     normalized_device_id = (device_id or "").strip() or None
     normalized_since = _normalize_since_option(since)
@@ -1343,10 +1475,10 @@ def drift(
         latest, previous, include_new_missing=include_new_missing
     )
 
-    if format == "json":
+    if normalized_format == "json":
         console.print(json.dumps(changes, indent=2))
         return
-    if format == "csv":
+    if normalized_format == "csv":
         buffer = StringIO()
         writer = csv.writer(buffer)
         writer.writerow(["device_id", "policy_id", "policy_name", "change", "previous", "current"])
@@ -1394,91 +1526,142 @@ def drift(
 @app.command()
 def doctor(
     format: str = typer.Option("table", "--format", help="table/json"),
+    integrity_check: bool = typer.Option(
+        False,
+        "--integrity-check",
+        help="Run PRAGMA integrity_check and include the result",
+    ),
+    vacuum: bool = typer.Option(
+        False,
+        "--vacuum",
+        help="Run VACUUM before reporting stats",
+    ),
     db: str | None = OPT_DB,
 ) -> None:
     """Show DB stats and common misconfiguration signals."""
-    normalized_format = format.strip().lower()
-    if normalized_format not in {"table", "json"}:
-        console.print(f"[red]Unknown format: {format}[/red]")
-        raise typer.Exit(code=2)
+    normalized_format = _normalize_choice_option(format, "--format", ("table", "json"))
 
     db_path = resolve_db_path(db)
     init_db(db_path)
 
     warnings: list[str] = []
-    db_size_bytes = 0
+    db_size_bytes_before = 0
+    db_size_bytes_after = 0
     if db_path.exists():
         try:
-            db_size_bytes = int(db_path.stat().st_size)
+            db_size_bytes_before = int(db_path.stat().st_size)
+            db_size_bytes_after = db_size_bytes_before
         except OSError as exc:
             warnings.append(f"Unable to stat DB file: {exc}")
 
-    with connect(db_path) as conn:
-        sqlite_version = str(conn.execute("SELECT sqlite_version()").fetchone()[0])
+    snapshot_before: dict[str, Any] = {
+        "sqlite_version": "",
+        "pragmas": {
+            "page_size": 0,
+            "page_count": 0,
+            "freelist_count": 0,
+            "journal_mode": "",
+            "synchronous": "",
+        },
+        "tables": {},
+        "indexes": [],
+    }
+    snapshot_after = dict(snapshot_before)
 
-        page_size = int(conn.execute("PRAGMA page_size").fetchone()[0])
-        page_count = int(conn.execute("PRAGMA page_count").fetchone()[0])
-        freelist_count = int(conn.execute("PRAGMA freelist_count").fetchone()[0])
-        journal_mode = str(conn.execute("PRAGMA journal_mode").fetchone()[0])
-        synchronous = str(conn.execute("PRAGMA synchronous").fetchone()[0])
+    integrity_messages: list[str] = []
+    integrity_ok: bool | None = None
+    vacuum_executed = False
+    vacuum_skipped_reason: str | None = None
+
+    with connect(db_path) as conn:
+        snapshot_before = _doctor_snapshot(conn)
+
+        if integrity_check:
+            try:
+                rows = conn.execute("PRAGMA integrity_check").fetchall()
+                integrity_messages = [
+                    str(row[0]).strip() for row in rows if row and row[0] is not None
+                ]
+                if not integrity_messages:
+                    integrity_messages = ["(no output)"]
+                integrity_ok = (
+                    len(integrity_messages) == 1
+                    and integrity_messages[0].strip().lower() == "ok"
+                )
+                if not integrity_ok:
+                    warnings.append(
+                        f"Integrity check reported {len(integrity_messages)} issue message(s)."
+                    )
+            except sqlite3.DatabaseError as exc:
+                integrity_ok = False
+                integrity_messages = [f"error: {exc}"]
+                warnings.append(f"Integrity check failed: {exc}")
 
         fk_issues = conn.execute("PRAGMA foreign_key_check").fetchall()
         if fk_issues:
             warnings.append(f"Foreign key check found {len(fk_issues)} issue(s).")
 
-        tables = {
-            "devices": int(conn.execute("SELECT COUNT(*) FROM devices").fetchone()[0]),
-            "device_facts": int(conn.execute("SELECT COUNT(*) FROM device_facts").fetchone()[0]),
-            "policies": int(conn.execute("SELECT COUNT(*) FROM policies").fetchone()[0]),
-            "policy_assignments": int(
-                conn.execute("SELECT COUNT(*) FROM policy_assignments").fetchone()[0]
-            ),
-            "policy_tag_assignments": int(
-                conn.execute("SELECT COUNT(*) FROM policy_tag_assignments").fetchone()[0]
-            ),
-            "scripts": int(conn.execute("SELECT COUNT(*) FROM scripts").fetchone()[0]),
-            "compliance_runs": int(
-                conn.execute("SELECT COUNT(*) FROM compliance_runs").fetchone()[0]
-            ),
-            "compliance_results": int(
-                conn.execute("SELECT COUNT(*) FROM compliance_results").fetchone()[0]
-            ),
-        }
+        if vacuum:
+            freelist_before = int(snapshot_before["pragmas"]["freelist_count"])
+            if freelist_before <= 0:
+                vacuum_skipped_reason = "no free pages"
+                warnings.append("No free pages detected; VACUUM skipped.")
+            else:
+                try:
+                    conn.commit()
+                    conn.execute("VACUUM")
+                    vacuum_executed = True
+                except sqlite3.DatabaseError as exc:
+                    warnings.append(f"VACUUM failed: {exc}")
+        snapshot_after = _doctor_snapshot(conn)
 
-        indexes = [
-            str(row["name"])
-            for row in conn.execute(
-                """
-                SELECT name
-                FROM sqlite_master
-                WHERE type = 'index' AND name NOT LIKE 'sqlite_%'
-                ORDER BY name
-                """
-            ).fetchall()
-        ]
+    if db_path.exists():
+        try:
+            db_size_bytes_after = int(db_path.stat().st_size)
+        except OSError as exc:
+            warnings.append(f"Unable to stat DB file after maintenance: {exc}")
 
+    page_count = int(snapshot_after["pragmas"]["page_count"])
+    freelist_count = int(snapshot_after["pragmas"]["freelist_count"])
     if freelist_count > 0 and page_count > 0:
         ratio = freelist_count / page_count
         if ratio >= 0.25:
             warnings.append(
-                f"High freelist ratio ({freelist_count}/{page_count}); consider VACUUM for space "
-                "reclaim."
+                f"High freelist ratio ({freelist_count}/{page_count}); consider running "
+                "`fleetmdm doctor --vacuum`."
             )
 
     payload: dict[str, Any] = {
         "schema_version": 1,
         "db_path": str(db_path),
-        "db_size_bytes": db_size_bytes,
-        "sqlite_version": sqlite_version,
-        "pragmas": {
-            "page_size": page_size,
-            "page_count": page_count,
-            "freelist_count": freelist_count,
-            "journal_mode": journal_mode,
-            "synchronous": synchronous,
+        "db_size_bytes": db_size_bytes_after,
+        "sqlite_version": snapshot_after["sqlite_version"],
+        "pragmas": dict(snapshot_after["pragmas"]),
+        "tables": dict(snapshot_after["tables"]),
+        "indexes": list(snapshot_after["indexes"]),
+        "maintenance": {
+            "integrity_check": {
+                "requested": integrity_check,
+                "ok": integrity_ok,
+                "messages": integrity_messages,
+            },
+            "vacuum": {
+                "requested": vacuum,
+                "executed": vacuum_executed,
+                "skipped_reason": vacuum_skipped_reason,
+                "page_count_before": int(snapshot_before["pragmas"]["page_count"]),
+                "page_count_after": page_count,
+                "freelist_count_before": int(snapshot_before["pragmas"]["freelist_count"]),
+                "freelist_count_after": freelist_count,
+                "db_size_bytes_before": db_size_bytes_before,
+                "db_size_bytes_after": db_size_bytes_after,
+                "db_size_reclaimed_bytes": (
+                    max(0, db_size_bytes_before - db_size_bytes_after)
+                    if vacuum_executed
+                    else 0
+                ),
+            },
         },
-        "tables": tables,
-        "indexes": indexes,
         "warnings": warnings,
     }
 
@@ -1499,10 +1682,49 @@ def doctor(
         f"{payload['pragmas']['page_count']} @ {payload['pragmas']['page_size']} bytes",
     )
     table.add_row("Freelist", str(payload["pragmas"]["freelist_count"]))
+    integrity_state = "not requested"
+    if integrity_check:
+        integrity_state = "ok" if integrity_ok else "issues detected"
+    table.add_row("Integrity Check", integrity_state)
+    vacuum_state = "not requested"
+    if vacuum:
+        if vacuum_executed:
+            vacuum_state = "executed"
+        elif vacuum_skipped_reason:
+            vacuum_state = f"skipped ({vacuum_skipped_reason})"
+        else:
+            vacuum_state = "failed"
+        table.add_row(
+            "Vacuum Freelist",
+            (
+                f"{payload['maintenance']['vacuum']['freelist_count_before']} -> "
+                f"{payload['maintenance']['vacuum']['freelist_count_after']}"
+            ),
+        )
+        table.add_row(
+            "Vacuum Size (bytes)",
+            (
+                f"{payload['maintenance']['vacuum']['db_size_bytes_before']} -> "
+                f"{payload['maintenance']['vacuum']['db_size_bytes_after']}"
+            ),
+        )
+        table.add_row(
+            "Vacuum Reclaimed",
+            str(payload["maintenance"]["vacuum"]["db_size_reclaimed_bytes"]),
+        )
+    table.add_row("Vacuum", vacuum_state)
     for name, count in payload["tables"].items():
         table.add_row(f"Table: {name}", str(count))
     table.add_row("Indexes", str(len(payload["indexes"])))
     console.print(table)
+
+    if integrity_check and integrity_messages:
+        console.print("\nIntegrity Check Output:")
+        max_messages = 5
+        for msg in integrity_messages[:max_messages]:
+            console.print(f"- {msg}")
+        if len(integrity_messages) > max_messages:
+            console.print(f"- ... ({len(integrity_messages) - max_messages} more)")
 
     if warnings:
         console.print("\nWarnings:")
@@ -1516,10 +1738,7 @@ def evidence_key_list(
     format: str = typer.Option("table", "--format", help="table/json"),
 ) -> None:
     """List signing keys in a keyring (using keyring.json when present)."""
-    normalized_format = format.strip().lower()
-    if normalized_format not in {"table", "json"}:
-        console.print(f"[red]Unknown format: {format}[/red]")
-        raise typer.Exit(code=2)
+    normalized_format = _normalize_choice_option(format, "--format", ("table", "json"))
 
     manifest_path = _keyring_manifest_path(keyring_dir)
     warnings: list[str] = []
@@ -1870,10 +2089,7 @@ def evidence_verify(
     output: Path | None = OPT_VERIFY_OUTPUT,
 ) -> None:
     """Verify evidence bundle integrity and optional signature."""
-    normalized_format = format.strip().lower()
-    if normalized_format not in {"text", "json"}:
-        console.print(f"[red]Unknown format: {format}[/red]")
-        raise typer.Exit(code=2)
+    normalized_format = _normalize_choice_option(format, "--format", ("text", "json"))
 
     if output and normalized_format != "json":
         console.print("[red]--output is only supported with --format json[/red]")

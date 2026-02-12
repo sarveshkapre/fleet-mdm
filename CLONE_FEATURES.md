@@ -7,13 +7,10 @@
 - Gaps found during codebase exploration
 
 ## Candidate Features To Do
-- [ ] P2 - CI reliability: pin Python patch version in workflow matrix and add periodic dependency update policy doc. Score: impact 3, effort 2, fit 4, differentiation 1, risk 1, confidence 4.
-- [ ] P2 - CLI UX: normalize invalid `--format` handling across commands with consistent exit code/text. Score: impact 3, effort 2, fit 4, differentiation 1, risk 1, confidence 4.
 - [ ] P2 - Policy quality gate: add `fleetmdm policy lint` for schema + semantic checks without DB mutation. Score: impact 4, effort 3, fit 4, differentiation 2, risk 2, confidence 3.
-- [ ] P2 - Assignment UX: add `policy assignments --unmatched-tags` to detect stale tag assignments. Score: impact 3, effort 2, fit 4, differentiation 2, risk 1, confidence 4.
 - [ ] P2 - Security docs: add explicit threat model and trust boundaries for local-first deployment. Score: impact 3, effort 2, fit 4, differentiation 1, risk 1, confidence 4.
 - [ ] P2 - Reliability: add explicit error taxonomy (`code`, `message`) for JSON-mode failures. Score: impact 4, effort 3, fit 4, differentiation 2, risk 2, confidence 3.
-- [ ] P3 - `fleetmdm doctor` enhancements: optional `--integrity-check` and `--vacuum` guidance/automation. Score: impact 3, effort 3, fit 4, differentiation 2, risk 2, confidence 4.
+- [ ] P2 - CI reliability: pin Python patch version in workflow matrix and add periodic dependency update policy doc. Score: impact 3, effort 2, fit 4, differentiation 1, risk 1, confidence 4.
 - [ ] P3 - Config file support for default `--db`, report defaults, and evidence output path. Score: impact 3, effort 4, fit 4, differentiation 2, risk 2, confidence 3.
 - [ ] P3 - Performance: add microbench for report/drift with synthetic 10k-row history and index tuning follow-ups. Score: impact 3, effort 3, fit 3, differentiation 2, risk 2, confidence 3.
 - [ ] P3 - Security: redact high-risk fact keys by default (`serial`, `uuid`, hardware IDs) in strict evidence profile metadata docs. Score: impact 3, effort 2, fit 4, differentiation 2, risk 1, confidence 4.
@@ -23,9 +20,16 @@
 - [ ] P3 - Packaging: provide Homebrew/Nix install docs with checksum-based release artifact verification. Score: impact 2, effort 3, fit 3, differentiation 1, risk 1, confidence 3.
 - [ ] P3 - Ops UX: add `fleetmdm report --output` for direct file artifact creation without shell redirects. Score: impact 3, effort 2, fit 3, differentiation 1, risk 1, confidence 4.
 - [ ] P3 - Ops UX: add `fleetmdm history --latest-run` shortcut for rapid post-check troubleshooting. Score: impact 2, effort 2, fit 3, differentiation 1, risk 1, confidence 4.
+- [ ] P3 - Ops UX: add `fleetmdm evidence verify --strict` to fail on warnings in CI pipelines. Score: impact 3, effort 2, fit 4, differentiation 1, risk 1, confidence 4.
+- [ ] P3 - Ops UX: add `fleetmdm doctor --output` JSON artifact export for scripted diagnostics. Score: impact 2, effort 2, fit 4, differentiation 1, risk 1, confidence 4.
+- [ ] P3 - Reliability: add `fleetmdm db backup` command using SQLite online backup API for safe local snapshots. Score: impact 3, effort 3, fit 4, differentiation 2, risk 2, confidence 3.
+- [ ] P3 - Reliability: add retention command for compliance history/runs (`fleetmdm history prune --before <ts>`). Score: impact 3, effort 3, fit 4, differentiation 2, risk 2, confidence 3.
 - [ ] P3 - Docs quality: split long command recipes into `docs/` pages and keep README within two-screen quickstart. Score: impact 2, effort 2, fit 4, differentiation 1, risk 1, confidence 4.
 
 ## Implemented
+- [x] 2026-02-12 - Doctor parity shipped: `fleetmdm doctor --integrity-check` + `--vacuum` with maintenance before/after metrics in JSON/table output. Evidence: `src/fleetmdm/cli.py`, `tests/test_cli.py`, `README.md`, `PRODUCT_ROADMAP.md`.
+- [x] 2026-02-12 - CLI format validation parity: normalize invalid `--format` behavior across `check`/`report`/`history`/`drift`/`doctor` and evidence format surfaces (consistent exit code `2`). Evidence: `src/fleetmdm/cli.py`, `tests/test_cli.py`, `docs/CHANGELOG.md`.
+- [x] 2026-02-12 - Assignment hygiene visibility: `fleetmdm policy assignments --unmatched-tags` surfaced + covered in CLI tests and smoke path. Evidence: `src/fleetmdm/cli.py`, `tests/test_cli.py`, `PRODUCT_ROADMAP.md`.
 - [x] 2026-02-12 - SARIF parity upgrade: enrich SARIF rule metadata (`helpUri`, `fullDescription`) and add `report --sarif-max-failures-per-policy` for bounded failed-device samples. Evidence: `src/fleetmdm/report.py`, `src/fleetmdm/cli.py`, `tests/test_cli.py`, `README.md`, `docs/CHANGELOG.md`.
 - [x] 2026-02-12 - Evidence parity upgrade: add `evidence export --history-limit N` with optional `history.json` excerpts and strict redaction consistency for history device IDs. Evidence: `src/fleetmdm/cli.py`, `tests/test_cli.py`, `README.md`, `docs/CHANGELOG.md`.
 - [x] 2026-02-12 - Report UX for scale: add `fleetmdm report --sort-by name|failed|passed` and `--top N` for deterministic ranking/slicing. Evidence: `src/fleetmdm/cli.py`, `tests/test_cli.py`, `README.md`, `docs/CHANGELOG.md`.
@@ -63,7 +67,6 @@
 - [x] 2026-02-09 - Added SOC-style evidence export command. Evidence: `src/fleetmdm/cli.py`, `tests/test_cli.py`, `README.md`.
 - [x] 2026-02-09 - Added evidence integrity manifest with per-artifact SHA256 + bundle fingerprint and deterministic artifact serialization. Evidence: `src/fleetmdm/cli.py`, `tests/test_cli.py`, smoke run.
 - [x] 2026-02-09 - Added `fleetmdm evidence verify` plus optional HMAC signing (`--signing-key-file`, `signature.json`). Evidence: `src/fleetmdm/cli.py`, `tests/test_cli.py`, smoke run.
-- [x] 2026-02-09 - Added evidence redaction profiles (`none|minimal|strict`) for device IDs and serials. Evidence: `src/fleetmdm/cli.py`, `tests/test_cli.py`, `README.md`.
 - [x] 2026-02-09 - Enforced deterministic DB ordering for policies/devices/scripts/results/history paths. Evidence: `src/fleetmdm/store.py`, `make check`.
 - [x] 2026-02-09 - Expanded CLI coverage for evidence export/verify tamper detection and profile behavior. Evidence: `tests/test_cli.py`, `make check`.
 - [x] 2026-02-09 - Added session memory/incident docs (`PROJECT_MEMORY.md`, `INCIDENTS.md`) aligned with cycle evidence. Evidence: `PROJECT_MEMORY.md`, `INCIDENTS.md`.
@@ -87,9 +90,11 @@
 - SARIF output makes FleetMDM results first-class in code-scanning/compliance pipelines without forcing a hosted service.
 - SARIF consumers benefit from metadata depth (`helpUri`, richer descriptions) and bounded device samples; this keeps scanner output actionable without unbounded payload growth.
 - A lightweight `doctor` command reduces operational friction (DB size, counts, pragmas, index visibility) and makes troubleshooting repeatable.
+- Extending `doctor` with optional maintenance execution (`--vacuum`) plus integrity checks closes the loop between diagnosis and remediation in one operator command.
 - Optional bounded evidence history excerpts reduce auditor context switches while preserving artifact-size control.
 - Market scan signals that exportable audit artifacts and scheduled exports are baseline expectations; CLI filters + machine-readable outputs are high leverage.
 - CSV exports are a frequent audit artifact; protecting against spreadsheet formula injection is a cheap, high-signal hardening step (especially when inventory/policy strings are untrusted inputs).
+- A single shared `--format` normalizer prevents subtle behavior drift across command surfaces and keeps CLI automation failure modes predictable.
 
 ## Notes
 - This file is maintained by the autonomous clone loop.

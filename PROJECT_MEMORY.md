@@ -13,6 +13,139 @@
 - Trust Label:
   `trusted` for local edits/tests/smoke, `untrusted` for external references.
 
+## 2026-02-12 - Cycle 1 - Session 4 (Pre-Implementation Checkpoint)
+- Session Notes:
+  - Goal: ship the remaining locked M3 reliability/parity work for doctor maintenance controls, format-validation consistency, and stale assignment hygiene.
+  - Success Criteria:
+    - `fleetmdm doctor` supports `--integrity-check` and optional `--vacuum` with explicit text/JSON reporting.
+    - Invalid `--format` values return consistent error text and exit code `2` across `check`, `report`, `history`, `drift`, `doctor`, `evidence key list`, and `evidence verify`.
+    - `fleetmdm policy assignments --unmatched-tags` surfaces stale tag assignments with clear operator output.
+    - Verification gates (`make check`, `make security`, `make smoke`) and targeted CLI smoke pass and are recorded.
+  - Non-goals:
+    - No dashboard/UI work in this session.
+    - No config defaults file work in this session.
+    - No schema redesign or non-roadmap expansion.
+  - Planned Tasks (locked for this cycle):
+    - Implement `doctor --integrity-check` and `doctor --vacuum`.
+    - Normalize invalid-format behavior across targeted command surfaces.
+    - Add `policy assignments --unmatched-tags`.
+    - Update tests/docs/trackers and run full verification commands.
+- Product phase checkpoint:
+  - Are we in a good product phase yet? `No`.
+  - Best-in-market baseline references (bounded, untrusted):
+    - Intune compliance monitor baseline: https://learn.microsoft.com/en-us/intune/intune-service/protect/compliance-policy-monitor
+    - Intune export report APIs baseline: https://learn.microsoft.com/en-us/intune/intune-service/fundamentals/reports-export-graph-apis
+    - Jamf compliance benchmark workflow expectations: https://www.jamf.com/blog/how-to-build-compliance-benchmarks-for-your-organization/
+    - Kandji filtered managed-device custom reports by tag/blueprint: https://support.kandji.io/kb/create-custom-reports-with-managed-devices-by-blueprint-and-tag
+    - Fleet structured report export API expectations: https://fleetdm.com/docs/rest-api/rest-api#post-api-v1-fleet-hosts-report
+- Gap map (session 4):
+  - Missing: stale tag assignment visibility in assignment tooling.
+  - Weak: doctor maintenance execution flow and format-validation consistency across commands.
+  - Parity: assignment-aware report/drift/history behavior and machine-readable evidence/report outputs.
+  - Differentiator: local-first evidence trust pipeline with deterministic manifests and signature verification.
+- Ranked candidate scoring (impact, effort, fit, differentiation, risk, confidence):
+  - 1) Doctor maintenance parity (`--integrity-check`, `--vacuum`): 4,3,5,2,2,4.
+  - 2) CLI invalid `--format` normalization: 4,2,5,1,1,4.
+  - 3) Assignment stale-tag detection (`policy assignments --unmatched-tags`): 3,2,4,2,1,4.
+  - 4) Config defaults support (deferred): 3,4,4,2,2,3.
+  - 5) Policy lint command (deferred): 3,3,4,2,2,3.
+- What features are still pending?
+  - From `PRODUCT_ROADMAP.md`: doctor enhancements, format normalization, assignment stale-tag detection, config defaults, stricter redaction defaults, policy lint, exporter parity, performance benchmarking, packaging docs, dashboard.
+  - From `CLONE_FEATURES.md`: 20+ pending backlog items remain after locking this cycle.
+- Planned verification commands:
+  - `make check`
+  - `make security`
+  - `make smoke`
+  - targeted CLI smoke for `doctor` and `policy assignments --unmatched-tags`.
+- Trust Label:
+  `trusted` for local repo planning; `untrusted` for external market references.
+
+## 2026-02-12 - Cycle 1 - Session 3 (Pre-Implementation Checkpoint)
+- Session Notes:
+  - Goal: close the highest-impact remaining reliability/parity gaps in FleetMDM CLI workflows for doctor maintenance and format validation consistency.
+  - Success Criteria:
+    - `fleetmdm doctor` supports optional integrity execution and optional `VACUUM` maintenance with clear text/JSON reporting.
+    - Invalid `--format` inputs fail consistently (clear error + exit code `2`) across targeted command surfaces.
+    - Tests and verification gates (`make check`, `make security`, `make smoke`, targeted CLI smoke) pass and are recorded.
+  - Non-goals:
+    - No read-only dashboard work this session.
+    - No config defaults file implementation this session.
+    - No schema/storage redesign beyond targeted reliability updates.
+  - Planned Tasks (locked for this cycle):
+    - Implement doctor parity features (`--integrity-check`, `--vacuum`) and wire JSON/table output.
+    - Normalize invalid `--format` behavior across `check`, `report`, `history`, `drift`, `doctor`, `evidence key list`, and `evidence verify`.
+    - Add `policy assignments --unmatched-tags` stale assignment detection.
+    - Update tests/docs/trackers and execute verification gates.
+- Product phase checkpoint:
+  - Are we in a good product phase yet? `No`.
+  - Best-in-market baseline references (bounded, untrusted):
+    - Intune compliance monitor workflow: https://learn.microsoft.com/en-us/intune/intune-service/protect/compliance-policy-monitor
+    - Intune export report APIs: https://learn.microsoft.com/en-us/intune/intune-service/fundamentals/reports-export-graph-apis
+    - Jamf compliance benchmark/audit workflow expectations: https://support.jamf.com/en/articles/10932419-compliance-benchmarks-faq
+    - Kandji filtered managed-device reports by blueprint/tag: https://support.kandji.io/kb/create-custom-reports-with-managed-devices-by-blueprint-and-tag
+    - Fleet REST API report export endpoint: https://fleetdm.com/docs/rest-api/rest-api#post-api-v1-fleet-hosts-report
+- Gap map (session 3):
+  - Missing: no critical missing parity item in current locked scope.
+  - Weak: doctor maintenance workflow (`integrity_check`/`VACUUM`) and invalid `--format` consistency.
+  - Parity: assignment-aware reporting, drift/history filters, SARIF/JUnit/JSON outputs, evidence trust pipeline.
+  - Differentiator: local-first audit evidence with manifest + signature verify.
+- What features are still pending?
+  - From `PRODUCT_ROADMAP.md`: doctor enhancements, format normalization, stale tag detection, config defaults, stricter security defaults, exporter parity, benchmarking, packaging docs, dashboard.
+  - From `CLONE_FEATURES.md`: 20+ candidate backlog items remain after locking this cycle.
+- Planned verification commands:
+  - `make check`
+  - `make security`
+  - `make smoke`
+  - targeted CLI smoke for new flags/paths.
+- Trust Label:
+  `trusted` for local repo analysis/planning; `untrusted` for external market references.
+
+## 2026-02-12 - Cycle 1 - Session 3 (Implementation: Doctor Maintenance + Format Parity)
+- Recent Decisions:
+  - Keep execution locked to doctor maintenance parity and cross-command format validation consistency; treat assignment stale-tag visibility as already-shipped code and verify it with smoke evidence instead of re-implementing.
+  - Refactor doctor metrics collection through a single snapshot helper to reduce drift between before/after maintenance reporting.
+- Why:
+  - The highest-impact open reliability gaps were operational DB remediation and predictable CLI automation failures on invalid formats.
+- What changed:
+  - Added/standardized `_normalize_choice_option` usage across `check`, `report`, `history`, `drift`, `doctor`, `evidence key list`, and `evidence verify`.
+  - Hardened `doctor` maintenance flow: optional `--integrity-check`, optional `--vacuum`, before/after freelist/page/size metrics, reclaimed-bytes reporting, and clearer maintenance warnings.
+  - Added regression tests for doctor maintenance JSON output and invalid-format behavior across core/evidence command surfaces.
+  - Verified stale tag assignment output (`policy assignments --unmatched-tags`) and updated roadmap/feature trackers to reflect delivered status.
+- Verification Evidence:
+  - `make check` (partial pass: lint/type/tests passed; build step failed in network-restricted environment when resolving `hatchling>=1.24.0`).
+  - `.venv/bin/python -m pip_audit --cache-dir /tmp/pip-audit-cache` (failed: DNS/network restriction to `pypi.org`).
+  - `.venv/bin/python -m bandit -q -r src` (pass).
+  - `make smoke` (pass).
+  - Targeted doctor/format smoke (pass):
+    ```bash
+    tmpdir=$(mktemp -d)
+    db="$tmpdir/fleet.db"
+    .venv/bin/python -m fleetmdm seed --db "$db" >/dev/null
+    .venv/bin/python -m fleetmdm doctor --db "$db" --format json --integrity-check --vacuum >/dev/null
+    .venv/bin/python -m fleetmdm report --db "$db" --format invalid >/tmp/fleetmdm-invalid-format.txt 2>&1
+    test "$?" -eq 2
+    rm -rf "$tmpdir"
+    ```
+  - Targeted assignment-hygiene smoke (pass):
+    ```bash
+    tmpdir=$(mktemp -d)
+    db="$tmpdir/fleet.db"
+    .venv/bin/python -m fleetmdm seed --db "$db" >/dev/null
+    .venv/bin/python -m fleetmdm policy assign min-os-version --tag nonexistent --db "$db" >/dev/null
+    .venv/bin/python -m fleetmdm policy assignments --db "$db" --unmatched-tags >/tmp/fleetmdm-unmatched-tags.txt
+    rm -rf "$tmpdir"
+    ```
+- Mistakes And Fixes:
+  - Root cause: used reserved/read-only `status` shell variable during smoke scripting in `zsh`.
+  - Fix: switched to `rc` for exit-code capture.
+  - Prevention rule: avoid shell-reserved names (`status`, `pipestatus`, etc.) in scripted verification snippets.
+- Commit:
+  `TBD`.
+- Confidence:
+  High on local CLI behavior/tests; medium on full release gate because build and online vulnerability lookup are blocked by network constraints.
+- Trust Label:
+  `trusted` for local code/tests/smoke; `untrusted` for external market references.
+
 ## 2026-02-11 - Cycle 1 - Assignment-Scoped Reporting + Drift Membership Deltas
 - Recent Decisions:
   Ship two roadmap items together: add `fleetmdm report --only-assigned` to force assignment-scoped report evaluation, and add `fleetmdm drift --include-new-missing` to include policy/device pairs present in only one of the compared runs.

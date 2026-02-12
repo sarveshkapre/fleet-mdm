@@ -1,6 +1,9 @@
 # Changelog
 
 ## Unreleased (2026-02-10)
+- Add `fleetmdm doctor --integrity-check` (optional `PRAGMA integrity_check`) and `fleetmdm doctor --vacuum` maintenance execution with before/after metrics.
+- Add `fleetmdm policy assignments --unmatched-tags` to detect stale tag assignments that currently match zero devices.
+- Normalize invalid `--format` handling across CLI command surfaces with consistent validation messaging and exit code `2`.
 - Enrich `report --format sarif` with rule `helpUri`/`fullDescription` metadata.
 - Add `report --sarif-max-failures-per-policy N` to include bounded failed-device samples in SARIF results.
 - Add `evidence export --history-limit N` to optionally include bounded `history.json` excerpts in evidence bundles.

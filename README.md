@@ -87,6 +87,7 @@ fleetmdm drift --include-new-missing
 ### Assignments
 - Assign to a tag: `fleetmdm policy assign disk-encryption --tag prod`
 - Inspect: `fleetmdm policy assignments --device mac-001` or `fleetmdm policy assignments --tag prod`
+- Detect stale tag assignments: `fleetmdm policy assignments --unmatched-tags`
 - Remove: `fleetmdm policy unassign disk-encryption --tag prod`
 
 Note: if any assignments exist (device or tag), `check`/`report` evaluate only assigned policies. If no
@@ -113,6 +114,8 @@ Use `fleetmdm report --only-assigned` to force assignment-scoped reporting even 
 ### Doctor
 - DB stats and health signals: `fleetmdm doctor`
 - Machine-readable output: `fleetmdm doctor --format json`
+- Optional DB integrity execution: `fleetmdm doctor --integrity-check`
+- Optional maintenance vacuum (with before/after metrics): `fleetmdm doctor --vacuum`
 
 ### Evidence Packs
 - Export SOC-style evidence artifacts: `fleetmdm evidence export --output evidence/`
