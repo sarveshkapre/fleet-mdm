@@ -107,7 +107,7 @@
   - Fix: parameterized cache path in `Makefile` using `PIP_AUDIT_CACHE_DIR` defaulting to `/tmp/pip-audit-cache`.
   - Prevention rule: keep security-tool cache/output paths explicitly writable in automation targets.
 - Commit:
-  `pending`
+  `64f6c74`
 - Confidence:
   High on local feature behavior/tests; medium on release-gate completeness due network-restricted build/audit calls.
 - Trust Label:
@@ -166,7 +166,7 @@
   - Fix: reran verification with explicit `.venv/bin/python`.
   - Prevention rule: use explicit virtualenv interpreter paths in documented smoke commands.
 - Commit:
-  `pending`
+  `64f6c74`
 - Confidence:
   High.
 - Trust Label:
