@@ -7,6 +7,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 import sqlite3
 from collections.abc import Mapping, Sequence
@@ -18,6 +19,7 @@ from typing import Any
 
 import typer
 import yaml
+from click.core import ParameterSource
 from pydantic import ValidationError
 from rich.console import Console
 from rich.table import Table
@@ -27,6 +29,7 @@ from fleetmdm.crypto import sha256_text
 from fleetmdm.csvutil import csv_safe_cell
 from fleetmdm.inventory import inventory_json_schema, load_inventory_json
 from fleetmdm.policy import (
+    Policy,
     evaluate_policy,
     load_policy,
     load_policy_from_file,
@@ -78,6 +81,12 @@ from fleetmdm.store import (
 ARG_DEVICE_JSON = typer.Argument(..., exists=True, readable=True, help="Device JSON file")
 ARG_INVENTORY_JSON = typer.Argument(..., exists=True, readable=True, help="Inventory JSON file")
 ARG_POLICY_FILE = typer.Argument(..., exists=True, readable=True)
+ARG_POLICY_PATH = typer.Argument(
+    ...,
+    exists=True,
+    readable=True,
+    help="Policy YAML file or directory",
+)
 ARG_SCRIPT_FILE = typer.Argument(..., exists=True, readable=True)
 OPT_DB = typer.Option(None, "--db", help="Path to SQLite DB")
 OPT_OUTPUT = typer.Option(None, "--output", help="Write JSON to file")
@@ -147,6 +156,7 @@ ARG_EVIDENCE_DIR = typer.Argument(
 )
 
 ALLOWED_REDACTION_PROFILES = {"none", "minimal", "strict"}
+DEFAULT_CONFIG_PATH = "~/.fleetmdm/config.yaml"
 
 app = typer.Typer(help="FleetMDM CLI", add_completion=False)
 inventory_app = typer.Typer(help="Inventory tools")
@@ -219,6 +229,95 @@ def _device_tags_by_id(conn: sqlite3.Connection) -> dict[str, list[str]]:
 
 def _load_devices_from_json(path: Path) -> list[dict[str, Any]]:
     return load_inventory_json(path)
+
+
+def _iter_policy_lint_paths(path: Path, *, recursive: bool) -> list[Path]:
+    if path.is_file():
+        return [path]
+
+    pattern_method = path.rglob if recursive else path.glob
+    files = sorted(
+        [candidate for candidate in pattern_method("*.y*ml") if candidate.is_file()],
+        key=lambda item: str(item),
+    )
+    return files
+
+
+def _lint_policy_semantics(policy: Policy) -> tuple[list[str], list[str]]:
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    targets = policy.targets or {}
+    os_target = targets.get("os")
+    if os_target is not None and not isinstance(os_target, (str, list)):
+        errors.append("targets.os must be a string or list of strings")
+    if isinstance(os_target, list):
+        invalid_os_items = [item for item in os_target if not isinstance(item, str)]
+        if invalid_os_items:
+            errors.append("targets.os list must contain only strings")
+
+    tags_target = targets.get("tags")
+    if tags_target is not None and not isinstance(tags_target, (str, list)):
+        errors.append("targets.tags must be a string or list of strings")
+    if isinstance(tags_target, list):
+        normalized_tags = [str(item).strip().lower() for item in tags_target if str(item).strip()]
+        if len(set(normalized_tags)) < len(normalized_tags):
+            warnings.append("targets.tags contains duplicate values after normalization")
+        invalid_tag_items = [item for item in tags_target if not isinstance(item, str)]
+        if invalid_tag_items:
+            errors.append("targets.tags list must contain only strings")
+
+    seen_checks: set[tuple[str, str, str]] = set()
+    for index, check in enumerate(policy.checks, start=1):
+        signature = (check.key.strip(), check.op.strip(), json.dumps(check.value, sort_keys=True))
+        if signature in seen_checks:
+            warnings.append(
+                f"checks[{index}] duplicates an earlier check "
+                f"({check.key} {check.op} {check.value!r})"
+            )
+        seen_checks.add(signature)
+
+        if check.op in {"in", "not_in"} and (
+            not isinstance(check.value, list) or len(check.value) == 0
+        ):
+            errors.append(
+                f"checks[{index}] uses '{check.op}' but value must be a non-empty list"
+            )
+        if check.op == "regex":
+            try:
+                re.compile(str(check.value))
+            except re.error as exc:
+                errors.append(f"checks[{index}] invalid regex pattern: {exc}")
+
+    return errors, warnings
+
+
+def _lint_policy_file(path: Path) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "path": str(path),
+        "policy_id": None,
+        "ok": False,
+        "errors": [],
+        "warnings": [],
+    }
+
+    schema_errors = validate_policy_file(str(path))
+    if schema_errors:
+        payload["errors"] = list(schema_errors)
+        return payload
+
+    try:
+        policy, _raw_yaml = load_policy_from_file(str(path))
+    except (ValueError, ValidationError) as exc:
+        payload["errors"] = [str(exc)]
+        return payload
+
+    semantic_errors, warnings = _lint_policy_semantics(policy)
+    payload["policy_id"] = policy.id
+    payload["errors"] = semantic_errors
+    payload["warnings"] = warnings
+    payload["ok"] = len(semantic_errors) == 0
+    return payload
 
 
 def _compute_drift_changes(
@@ -479,12 +578,181 @@ def _normalize_choice_option(value: str, option_name: str, allowed: Sequence[str
     normalized = str(value).strip().lower()
     allowed_values = [str(item).strip().lower() for item in allowed if str(item).strip()]
     if normalized not in allowed_values:
-        console.print(
-            f"Invalid {option_name} value. Expected one of: "
+        typer.echo(
+            f"Invalid {option_name} value '{value}'. Expected one of: "
             f"{', '.join(allowed_values)}"
         )
         raise typer.Exit(code=2)
     return normalized
+
+
+def _option_provided(ctx: typer.Context | None, param_name: str) -> bool:
+    if ctx is None:
+        return False
+    source = ctx.get_parameter_source(param_name)
+    return source == ParameterSource.COMMANDLINE
+
+
+def _load_config_or_exit() -> dict[str, Any]:
+    raw_path = os.environ.get("FLEETMDM_CONFIG", DEFAULT_CONFIG_PATH)
+    config_path = Path(os.path.expanduser(raw_path))
+    if not config_path.exists():
+        return {}
+
+    try:
+        payload = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        console.print(f"[red]Invalid config file {config_path}: {exc}[/red]")
+        raise typer.Exit(code=2) from exc
+
+    if payload is None:
+        return {}
+    if not isinstance(payload, dict):
+        console.print(f"[red]Invalid config file {config_path}: root must be a mapping[/red]")
+        raise typer.Exit(code=2)
+    return payload
+
+
+def _config_mapping(payload: Mapping[str, Any], key: str) -> dict[str, Any]:
+    value = payload.get(key)
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        console.print(f"[red]Invalid config value for '{key}': expected a mapping[/red]")
+        raise typer.Exit(code=2)
+    return dict(value)
+
+
+def _config_string(payload: Mapping[str, Any], key: str) -> str | None:
+    value = payload.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        console.print(f"[red]Invalid config value for '{key}': expected a non-empty string[/red]")
+        raise typer.Exit(code=2)
+    return value.strip()
+
+
+def _config_non_negative_int(payload: Mapping[str, Any], key: str) -> int | None:
+    value = payload.get(key)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        console.print(
+            f"[red]Invalid config value for '{key}': expected a non-negative integer[/red]"
+        )
+        raise typer.Exit(code=2)
+    return int(value)
+
+
+def _resolve_db_path_with_defaults(db: str | None) -> Path:
+    if db is not None:
+        return resolve_db_path(db)
+
+    config = _load_config_or_exit()
+    configured_db = _config_string(config, "db")
+    return resolve_db_path(configured_db)
+
+
+def _resolve_report_defaults(
+    *,
+    format: str,
+    sort_by: str,
+    top: int,
+    sarif_max_failures_per_policy: int,
+    ctx: typer.Context | None,
+) -> tuple[str, str, int, int]:
+    use_config = not (
+        _option_provided(ctx, "format")
+        and _option_provided(ctx, "sort_by")
+        and _option_provided(ctx, "top")
+        and _option_provided(ctx, "sarif_max_failures_per_policy")
+    )
+    if not use_config:
+        return format, sort_by, top, sarif_max_failures_per_policy
+
+    config = _load_config_or_exit()
+    report_defaults = _config_mapping(config, "report")
+
+    resolved_format = (
+        format
+        if _option_provided(ctx, "format")
+        else _config_string(report_defaults, "format") or format
+    )
+    resolved_sort_by = (
+        sort_by
+        if _option_provided(ctx, "sort_by")
+        else _config_string(report_defaults, "sort_by") or sort_by
+    )
+    configured_top = (
+        _config_non_negative_int(report_defaults, "top")
+        if report_defaults.get("top") is not None
+        else None
+    )
+    resolved_top = (
+        top
+        if _option_provided(ctx, "top")
+        else configured_top
+        if configured_top is not None
+        else top
+    )
+    configured_sarif_limit = (
+        _config_non_negative_int(report_defaults, "sarif_max_failures_per_policy")
+        if report_defaults.get("sarif_max_failures_per_policy") is not None
+        else None
+    )
+    resolved_sarif_limit = (
+        sarif_max_failures_per_policy
+        if _option_provided(ctx, "sarif_max_failures_per_policy")
+        else configured_sarif_limit
+        if configured_sarif_limit is not None
+        else sarif_max_failures_per_policy
+    )
+    return resolved_format, resolved_sort_by, resolved_top, resolved_sarif_limit
+
+
+def _resolve_evidence_export_defaults(
+    *,
+    output: Path | None,
+    redaction_profile: str,
+    history_limit: int,
+    ctx: typer.Context | None,
+) -> tuple[Path | None, str, int]:
+    use_config = not (
+        _option_provided(ctx, "output")
+        and _option_provided(ctx, "redaction_profile")
+        and _option_provided(ctx, "history_limit")
+    )
+    if not use_config:
+        return output, redaction_profile, history_limit
+
+    config = _load_config_or_exit()
+    evidence_defaults = _config_mapping(config, "evidence_export")
+
+    resolved_output = output
+    if not _option_provided(ctx, "output"):
+        configured_output = _config_string(evidence_defaults, "output")
+        if configured_output:
+            resolved_output = Path(configured_output)
+
+    resolved_profile = (
+        redaction_profile
+        if _option_provided(ctx, "redaction_profile")
+        else _config_string(evidence_defaults, "redaction_profile") or redaction_profile
+    )
+    configured_history_limit = (
+        _config_non_negative_int(evidence_defaults, "history_limit")
+        if evidence_defaults.get("history_limit") is not None
+        else None
+    )
+    resolved_history_limit = (
+        history_limit
+        if _option_provided(ctx, "history_limit")
+        else configured_history_limit
+        if configured_history_limit is not None
+        else history_limit
+    )
+    return resolved_output, resolved_profile, resolved_history_limit
 
 
 def _doctor_snapshot(conn: sqlite3.Connection) -> dict[str, Any]:
@@ -719,7 +987,7 @@ def version() -> None:
 @app.command()
 def init(db: str | None = typer.Option(None, "--db", help="Path to SQLite DB")) -> None:
     """Initialize the FleetMDM database."""
-    db_path = resolve_db_path(db)
+    db_path = _resolve_db_path_with_defaults(db)
     init_db(db_path)
     console.print(f"Initialized DB at {db_path}")
 
@@ -735,7 +1003,7 @@ def ingest(
     except (ValueError, ValidationError) as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=1) from exc
-    db_path = resolve_db_path(db)
+    db_path = _resolve_db_path_with_defaults(db)
     init_db(db_path)
     with connect(db_path) as conn:
         for device in devices:
@@ -751,7 +1019,7 @@ def export(
     db: str | None = OPT_DB,
 ) -> None:
     """Export inventory as JSON."""
-    db_path = resolve_db_path(db)
+    db_path = _resolve_db_path_with_defaults(db)
     init_db(db_path)
     with connect(db_path) as conn:
         payload = export_inventory(conn)
@@ -774,6 +1042,60 @@ def policy_validate(path: Path = ARG_POLICY_FILE) -> None:
     console.print("OK")
 
 
+@policy_app.command("lint")
+def policy_lint(
+    path: Path = ARG_POLICY_PATH,
+    recursive: bool = typer.Option(
+        False,
+        "--recursive",
+        help="When PATH is a directory, lint YAML files recursively",
+    ),
+    format: str = typer.Option("text", "--format", help="text/json"),
+) -> None:
+    """Lint policy files for schema + semantic issues without mutating the DB."""
+    normalized_format = _normalize_choice_option(format, "--format", ("text", "json"))
+
+    paths = _iter_policy_lint_paths(path, recursive=recursive)
+    if not paths:
+        console.print("No policy files found")
+        raise typer.Exit(code=1)
+
+    results = [_lint_policy_file(candidate) for candidate in paths]
+    has_errors = any(not bool(item.get("ok")) for item in results)
+
+    if normalized_format == "json":
+        payload = {
+            "schema_version": 1,
+            "path": str(path),
+            "recursive": recursive,
+            "count": len(results),
+            "ok": not has_errors,
+            "results": results,
+        }
+        typer.echo(_json_payload_text(payload), nl=False)
+        if has_errors:
+            raise typer.Exit(code=1)
+        return
+
+    for item in results:
+        status = "OK" if item["ok"] else "FAIL"
+        warnings = list(item.get("warnings", []))
+        if item["ok"] and warnings:
+            status = "WARN"
+        policy_id = item.get("policy_id")
+        label = f"{status}: {item['path']}"
+        if policy_id:
+            label += f" (policy_id={policy_id})"
+        console.print(label)
+        for warning in warnings:
+            console.print(f"  warning: {warning}")
+        for error in item.get("errors", []):
+            console.print(f"  error: {error}")
+
+    if has_errors:
+        raise typer.Exit(code=1)
+
+
 @policy_app.command("add")
 def policy_add(
     path: Path = ARG_POLICY_FILE,
@@ -786,7 +1108,7 @@ def policy_add(
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=1) from exc
 
-    db_path = resolve_db_path(db)
+    db_path = _resolve_db_path_with_defaults(db)
     init_db(db_path)
     with connect(db_path) as conn:
         add_policy(conn, policy.id, policy.name, policy.description, raw_yaml)
@@ -798,7 +1120,7 @@ def policy_list(
     db: str | None = OPT_DB,
 ) -> None:
     """List policies."""
-    db_path = resolve_db_path(db)
+    db_path = _resolve_db_path_with_defaults(db)
     init_db(db_path)
     with connect(db_path) as conn:
         rows = list_policies(conn)
@@ -823,7 +1145,7 @@ def policy_assign(
         console.print("Provide exactly one of --device or --tag")
         raise typer.Exit(code=2)
 
-    db_path = resolve_db_path(db)
+    db_path = _resolve_db_path_with_defaults(db)
     init_db(db_path)
     with connect(db_path) as conn:
         if not policy_exists(conn, policy_id):
@@ -869,7 +1191,7 @@ def policy_unassign(
         console.print("Provide exactly one of --device or --tag")
         raise typer.Exit(code=2)
 
-    db_path = resolve_db_path(db)
+    db_path = _resolve_db_path_with_defaults(db)
     init_db(db_path)
     with connect(db_path) as conn:
         if not policy_exists(conn, policy_id):
@@ -920,7 +1242,7 @@ def policy_assignments(
         console.print("Provide exactly one of --device or --tag")
         raise typer.Exit(code=2)
 
-    db_path = resolve_db_path(db)
+    db_path = _resolve_db_path_with_defaults(db)
     init_db(db_path)
     with connect(db_path) as conn:
         name_map = _policy_name_map(conn)
@@ -1037,7 +1359,7 @@ def check(
         "--format",
         ("table", "json", "csv"),
     )
-    db_path = resolve_db_path(db)
+    db_path = _resolve_db_path_with_defaults(db)
     init_db(db_path)
     with connect(db_path) as conn:
         assignment_mode = has_any_policy_assignments(conn)
@@ -1154,6 +1476,7 @@ def check(
 
 @app.command()
 def report(
+    ctx: typer.Context,
     format: str = typer.Option("table", "--format", help="table/json/csv/junit/sarif"),
     device_id: str | None = OPT_DEVICE_OPTIONAL,
     policy_id: str | None = OPT_POLICY_ID_OPTIONAL,
@@ -1183,12 +1506,24 @@ def report(
     db: str | None = OPT_DB,
 ) -> None:
     """Summary compliance report across devices."""
+    (
+        resolved_format,
+        resolved_sort_by,
+        resolved_top,
+        resolved_sarif_limit,
+    ) = _resolve_report_defaults(
+        format=format,
+        sort_by=sort_by,
+        top=top,
+        sarif_max_failures_per_policy=sarif_max_failures_per_policy,
+        ctx=ctx,
+    )
     normalized_format = _normalize_choice_option(
-        format,
+        resolved_format,
         "--format",
         ("table", "json", "csv", "junit", "sarif"),
     )
-    normalized_sort_by = (sort_by or "").strip().lower()
+    normalized_sort_by = (resolved_sort_by or "").strip().lower()
     if normalized_sort_by not in {"name", "failed", "passed"}:
         console.print("Invalid --sort-by value. Expected one of: name, failed, passed")
         raise typer.Exit(code=2)
@@ -1200,7 +1535,7 @@ def report(
     normalized_device_id = (device_id or "").strip() or None
     normalized_policy_id = (policy_id or "").strip() or None
 
-    db_path = resolve_db_path(db)
+    db_path = _resolve_db_path_with_defaults(db)
     init_db(db_path)
     with connect(db_path) as conn:
         assignment_mode = has_any_policy_assignments(conn) or only_assigned
@@ -1306,8 +1641,8 @@ def report(
             )
         )
 
-    if top > 0:
-        filtered = filtered[:top]
+    if resolved_top > 0:
+        filtered = filtered[:resolved_top]
 
     if normalized_format == "json":
         console.print(json.dumps(filtered, indent=2))
@@ -1343,7 +1678,7 @@ def report(
             )
         typer.echo(
             render_sarif_summary(
-                sarif_rows, max_failures_per_policy=sarif_max_failures_per_policy
+                sarif_rows, max_failures_per_policy=resolved_sarif_limit
             ),
             nl=False,
         )
@@ -1374,7 +1709,7 @@ def history(
         ("table", "json", "csv"),
     )
     normalized_since = _normalize_since_option(since)
-    db_path = resolve_db_path(db)
+    db_path = _resolve_db_path_with_defaults(db)
     init_db(db_path)
     with connect(db_path) as conn:
         rows = list_compliance_history(conn, device_id, policy_id, limit, since=normalized_since)
@@ -1453,7 +1788,7 @@ def drift(
     normalized_device_id = (device_id or "").strip() or None
     normalized_since = _normalize_since_option(since)
 
-    db_path = resolve_db_path(db)
+    db_path = _resolve_db_path_with_defaults(db)
     init_db(db_path)
     with connect(db_path) as conn:
         runs = list_recent_runs(conn, 2, since=normalized_since)
@@ -1541,7 +1876,7 @@ def doctor(
     """Show DB stats and common misconfiguration signals."""
     normalized_format = _normalize_choice_option(format, "--format", ("table", "json"))
 
-    db_path = resolve_db_path(db)
+    db_path = _resolve_db_path_with_defaults(db)
     init_db(db_path)
 
     warnings: list[str] = []
@@ -2013,7 +2348,10 @@ def evidence_export(
                 drift_changes = _compute_drift_changes(latest_results, previous_results)
         if resolved_history_limit > 0:
             history_excerpt = [
-                dict(row) for row in list_compliance_history(conn, None, None, resolved_history_limit)
+                dict(row)
+                for row in list_compliance_history(
+                    conn, None, None, resolved_history_limit
+                )
             ]
 
     (
@@ -2466,7 +2804,7 @@ def script_add(
     content = path.read_text(encoding="utf-8")
     script_name = name or path.name
     script_id = f"script-{sha256_text(script_name)[:8]}"
-    db_path = resolve_db_path(db)
+    db_path = _resolve_db_path_with_defaults(db)
     init_db(db_path)
     with connect(db_path) as conn:
         add_script(conn, script_id, script_name, sha256_text(content), content)
@@ -2478,7 +2816,7 @@ def script_list(
     db: str | None = OPT_DB,
 ) -> None:
     """List scripts in the catalog."""
-    db_path = resolve_db_path(db)
+    db_path = _resolve_db_path_with_defaults(db)
     init_db(db_path)
     with connect(db_path) as conn:
         rows = list_scripts(conn)
@@ -2529,7 +2867,7 @@ def seed(
         """
     ).strip()
 
-    db_path = resolve_db_path(db)
+    db_path = _resolve_db_path_with_defaults(db)
     init_db(db_path)
     with connect(db_path) as conn:
         for device in sample_devices:

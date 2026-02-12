@@ -1,6 +1,9 @@
 # Changelog
 
 ## Unreleased (2026-02-10)
+- Improve `make security` reliability by defaulting `pip_audit` cache to a writable path (`/tmp/pip-audit-cache`) with `PIP_AUDIT_CACHE_DIR` override support.
+- Add optional config defaults file support (`~/.fleetmdm/config.yaml` or `FLEETMDM_CONFIG`) for `db`, `report`, and `evidence_export` settings.
+- Add `fleetmdm policy lint` for schema + semantic checks (regex validity, target shape, `in`/`not_in` value validation) without DB mutation.
 - Add `fleetmdm doctor --integrity-check` (optional `PRAGMA integrity_check`) and `fleetmdm doctor --vacuum` maintenance execution with before/after metrics.
 - Add `fleetmdm policy assignments --unmatched-tags` to detect stale tag assignments that currently match zero devices.
 - Normalize invalid `--format` handling across CLI command surfaces with consistent validation messaging and exit code `2`.

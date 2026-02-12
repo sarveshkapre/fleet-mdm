@@ -22,6 +22,25 @@ fleetmdm check --device mac-001
 fleetmdm report
 ```
 
+## Config defaults (optional)
+FleetMDM can load command defaults from `~/.fleetmdm/config.yaml`.
+Set `FLEETMDM_CONFIG=/path/to/config.yaml` to use a different file.
+
+```yaml
+db: /absolute/path/to/fleet.db
+report:
+  format: json
+  sort_by: failed
+  top: 10
+  sarif_max_failures_per_policy: 25
+evidence_export:
+  output: ./evidence
+  redaction_profile: strict
+  history_limit: 200
+```
+
+Command-line options override configured defaults.
+
 ## Agent-side exporters (examples)
 See `examples/exporters/`.
 
@@ -66,6 +85,7 @@ Targets (optional):
 ```bash
 fleetmdm init
 fleetmdm ingest examples/device.json
+fleetmdm policy lint examples/policy.yaml
 fleetmdm policy add examples/policy.yaml
 fleetmdm policy assign disk-encryption --device mac-001
 fleetmdm check --device mac-001
@@ -93,6 +113,11 @@ fleetmdm drift --include-new-missing
 Note: if any assignments exist (device or tag), `check`/`report` evaluate only assigned policies. If no
 assignments exist, all policies apply to all devices.
 Use `fleetmdm report --only-assigned` to force assignment-scoped reporting even when no assignments exist.
+
+### Policy lint
+- Lint one policy file: `fleetmdm policy lint examples/policy.yaml`
+- Lint a directory recursively: `fleetmdm policy lint ./policies --recursive`
+- Emit machine-readable results: `fleetmdm policy lint ./policies --recursive --format json`
 
 ### Schema export
 - Inventory schema: `fleetmdm schema inventory --output inventory.schema.json`

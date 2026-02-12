@@ -7,11 +7,9 @@
 - Gaps found during codebase exploration
 
 ## Candidate Features To Do
-- [ ] P2 - Policy quality gate: add `fleetmdm policy lint` for schema + semantic checks without DB mutation. Score: impact 4, effort 3, fit 4, differentiation 2, risk 2, confidence 3.
 - [ ] P2 - Security docs: add explicit threat model and trust boundaries for local-first deployment. Score: impact 3, effort 2, fit 4, differentiation 1, risk 1, confidence 4.
 - [ ] P2 - Reliability: add explicit error taxonomy (`code`, `message`) for JSON-mode failures. Score: impact 4, effort 3, fit 4, differentiation 2, risk 2, confidence 3.
 - [ ] P2 - CI reliability: pin Python patch version in workflow matrix and add periodic dependency update policy doc. Score: impact 3, effort 2, fit 4, differentiation 1, risk 1, confidence 4.
-- [ ] P3 - Config file support for default `--db`, report defaults, and evidence output path. Score: impact 3, effort 4, fit 4, differentiation 2, risk 2, confidence 3.
 - [ ] P3 - Performance: add microbench for report/drift with synthetic 10k-row history and index tuning follow-ups. Score: impact 3, effort 3, fit 3, differentiation 2, risk 2, confidence 3.
 - [ ] P3 - Security: redact high-risk fact keys by default (`serial`, `uuid`, hardware IDs) in strict evidence profile metadata docs. Score: impact 3, effort 2, fit 4, differentiation 2, risk 1, confidence 4.
 - [ ] P3 - Exporter parity: add Linux secure-boot fact collection and schema guidance in examples. Score: impact 3, effort 3, fit 3, differentiation 2, risk 2, confidence 3.
@@ -27,6 +25,9 @@
 - [ ] P3 - Docs quality: split long command recipes into `docs/` pages and keep README within two-screen quickstart. Score: impact 2, effort 2, fit 4, differentiation 1, risk 1, confidence 4.
 
 ## Implemented
+- [x] 2026-02-12 - Security gate reliability: `make security` now runs `pip_audit` with writable cache path default (`PIP_AUDIT_CACHE_DIR=/tmp/pip-audit-cache`) to avoid sandbox permission failures. Evidence: `Makefile`, `PROJECT_MEMORY.md`.
+- [x] 2026-02-12 - Policy quality gate: add `fleetmdm policy lint` (file/dir, recursive, text/json) for schema + semantic checks without DB mutation. Evidence: `src/fleetmdm/cli.py`, `tests/test_cli.py`, `README.md`, `docs/CHANGELOG.md`.
+- [x] 2026-02-12 - Config defaults support: add optional `~/.fleetmdm/config.yaml` (or `FLEETMDM_CONFIG`) for default `db`, `report`, and `evidence_export` options with CLI override precedence. Evidence: `src/fleetmdm/cli.py`, `tests/test_cli.py`, `README.md`, `docs/CHANGELOG.md`.
 - [x] 2026-02-12 - Doctor parity shipped: `fleetmdm doctor --integrity-check` + `--vacuum` with maintenance before/after metrics in JSON/table output. Evidence: `src/fleetmdm/cli.py`, `tests/test_cli.py`, `README.md`, `PRODUCT_ROADMAP.md`.
 - [x] 2026-02-12 - CLI format validation parity: normalize invalid `--format` behavior across `check`/`report`/`history`/`drift`/`doctor` and evidence format surfaces (consistent exit code `2`). Evidence: `src/fleetmdm/cli.py`, `tests/test_cli.py`, `docs/CHANGELOG.md`.
 - [x] 2026-02-12 - Assignment hygiene visibility: `fleetmdm policy assignments --unmatched-tags` surfaced + covered in CLI tests and smoke path. Evidence: `src/fleetmdm/cli.py`, `tests/test_cli.py`, `PRODUCT_ROADMAP.md`.
@@ -75,6 +76,9 @@
 - [x] 2026-02-09 - Documentation aligned with behavior changes and roadmap/changelog updates. Evidence: `README.md`, `docs/CHANGELOG.md`, `docs/ROADMAP.md`.
 
 ## Insights
+- Security-tool cache defaults can fail in constrained environments; explicitly configurable writable cache dirs keep `make security` actionable.
+- Config defaults reduce repetitive operator flags while preserving deterministic automation when command-line options explicitly override configured values.
+- A dedicated `policy lint` path catches regex/target/value-shape mistakes earlier than runtime `check`, reducing avoidable compliance-run noise.
 - Assignment semantics are safest when explicit: `report --only-assigned` prevents accidental “evaluate everything” behavior in large fleets that are migrating to assignment-based scoping.
 - Drift deltas are more actionable when membership changes are first-class (`new`/`missing`), not only status flips; this avoids blind spots when policies/devices appear or disappear between runs.
 - CI failures were caused by environment mismatch (`make` assumed `.venv` while workflow installed into system Python); keeping one setup path removes this class of failure.

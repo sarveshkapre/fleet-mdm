@@ -1,5 +1,35 @@
 # Incidents
 
+## 2026-02-12 - Local Regression During Maintenance: Partial CLI Helper State
+- Summary:
+  In-progress local edits briefly left `src/fleetmdm/cli.py` in a partially inconsistent helper/command state, causing transient command and test failures.
+- Impact:
+  Local validation failed until the helper definitions and `policy lint` wiring were made coherent; issue was contained before final push.
+- Root Cause:
+  Large incremental edits to shared CLI helpers were applied without immediately re-running full gates after each structural change.
+- Detection:
+  Local `make lint`/`pytest` failures and a transient `policy lint` command mismatch.
+- Prevention Rules:
+  After touching shared CLI helper sections, run `make lint` and targeted command smoke immediately.
+  Keep helper and command-registration changes in small, atomic commits.
+- Status:
+  Fixed locally; `make lint`, `make typecheck`, `.venv/bin/python -m pytest -q`, and focused smoke checks pass.
+
+## 2026-02-12 - Local Security Gate Failure: `pip_audit` Cache Path Permissions
+- Summary:
+  `make security` failed locally because `pip_audit` attempted to use a default cache path that is not writable in this sandboxed environment.
+- Impact:
+  Security gate failed before vulnerability evaluation, which obscured actionable security status and required manual workaround commands.
+- Root Cause:
+  Makefile invoked `pip_audit` without an explicit cache directory; tool-level defaults pointed at a permission-restricted path.
+- Detection:
+  Local `make security` failure with `PermissionError: [Errno 1] Operation not permitted` under `~/.pip-audit-cache`.
+- Prevention Rules:
+  Keep security-tool cache paths explicit and writable in automation targets.
+  Parameterize cache locations with an override variable for CI/sandbox portability.
+- Status:
+  Fixed on `main` by setting `PIP_AUDIT_CACHE_DIR` default in `Makefile` and using `pip_audit --cache-dir $(PIP_AUDIT_CACHE_DIR)`.
+
 ## 2026-02-09 - Local Smoke Failure: `make dev` Used Non-Executable Package Module
 - Summary:
   Local smoke verification failed because `make dev` ran `python -m fleetmdm`, but the package has no `__main__`.

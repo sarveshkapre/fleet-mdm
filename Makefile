@@ -1,5 +1,6 @@
 VENV?=.venv
 PY?=$(if $(wildcard $(VENV)/bin/python),$(VENV)/bin/python,python3)
+PIP_AUDIT_CACHE_DIR?=/tmp/pip-audit-cache
 
 .PHONY: setup dev smoke test lint typecheck build security check release
 
@@ -36,7 +37,7 @@ build:
 	$(PY) -m build
 
 security:
-	$(PY) -m pip_audit
+	$(PY) -m pip_audit --cache-dir $(PIP_AUDIT_CACHE_DIR)
 	$(PY) -m bandit -q -r src
 
 check: lint typecheck test build

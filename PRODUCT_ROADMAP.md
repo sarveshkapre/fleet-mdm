@@ -4,7 +4,7 @@
 - Keep fleet-mdm production-ready as a local-first compliance tool for inventory ingest, policy evaluation, and audit-grade evidence workflows.
 
 ## Definition Of Done
-- Core feature set supports real repeated usage for inventory, policy checks, triage, drift, and evidence export/verify.
+- Core feature set supports repeated real usage for inventory, policy checks, triage, drift, and evidence export/verify.
 - CLI UX is robust for scale (filters, sorting, bounded outputs, clear errors).
 - No open critical reliability/security issues in local verification gates.
 - Lint, typecheck, tests, build, and security checks pass and are documented with command evidence.
@@ -20,90 +20,93 @@
 ## Current Milestone
 - `M3 Reliability + Scale UX`
 
-## Session Goal Checkpoint (2026-02-12, Session 3)
+## Session Goal Checkpoint (2026-02-12, Session 5)
 - Goal (one sentence):
-  Deliver the highest-impact reliability/UX parity work by improving `doctor` maintenance actionability and normalizing CLI format-error behavior.
+  Ship the highest-value remaining M3 parity work by finalizing config-default behavior and delivering `policy lint` with reliable machine-readable output.
 - Success Criteria:
-  - `doctor` supports optional integrity checks and optional `VACUUM` maintenance execution with actionable output in both table/json modes.
-  - `check`/`report`/`history`/`drift`/`doctor` and evidence format surfaces reject invalid `--format` consistently (same error shape, exit code `2`).
-  - Relevant tests and local verification gates pass; docs and trackers are aligned.
+  - `fleetmdm policy lint` works for file and directory inputs (recursive optional) with text/json output and semantic validation.
+  - Config defaults (`FLEETMDM_CONFIG` / `~/.fleetmdm/config.yaml`) are honored for DB path, report defaults, and evidence export defaults.
+  - Local validation (`make lint`, `make typecheck`, `pytest -q`) passes and docs/trackers are synchronized.
 - Non-goals:
-  - Config defaults system for report/evidence/db options.
   - Optional read-only dashboard work.
-  - New agent/exporter data collection beyond existing schema.
+  - New agent/exporter data collection features.
+  - Release packaging automation changes.
 - Selected Tasks (locked for this session):
-  - Doctor maintenance parity (`--integrity-check`, `--vacuum`).
-  - Cross-command invalid `--format` normalization.
+  - Deliver and test `policy lint` parity.
+  - Complete config-default resolution helpers and wire them to command surfaces.
+  - Keep invalid `--format` validation consistent with no traceback noise.
 
-## Product Phase Checkpoint (2026-02-12, Session 4)
+## Product Phase Checkpoint (2026-02-12, Session 5)
 - Are we in a good product phase yet? `No`.
 - Best-in-market references (bounded market scan, untrusted):
-  - Microsoft Intune compliance monitoring (policy/device drill-down + assignment monitoring): https://learn.microsoft.com/en-us/intune/intune-service/protect/compliance-policy-monitor
-  - Microsoft Intune export report APIs (filtered, automation-ready export jobs): https://learn.microsoft.com/en-us/intune/intune-service/fundamentals/reports-export-graph-apis
-  - Jamf compliance benchmarks (benchmarks + evidence/audit workflows): https://www.jamf.com/blog/how-to-build-compliance-benchmarks-for-your-organization/
-  - Kandji managed-device custom reports by blueprint/tag (filtered reporting baseline): https://support.kandji.io/kb/create-custom-reports-with-managed-devices-by-blueprint-and-tag
-  - Fleet REST API report export surfaces (structured, API-first report retrieval): https://fleetdm.com/docs/rest-api/rest-api#post-api-v1-fleet-hosts-report
+  - Microsoft Intune compliance monitoring: https://learn.microsoft.com/en-us/intune/intune-service/protect/compliance-policy-monitor
+  - Microsoft Intune export report APIs: https://learn.microsoft.com/en-us/intune/intune-service/fundamentals/reports-export-graph-apis
+  - Jamf compliance benchmark workflows: https://www.jamf.com/blog/how-to-build-compliance-benchmarks-for-your-organization/
+  - Kandji managed-device custom reports by blueprint/tag: https://support.kandji.io/kb/create-custom-reports-with-managed-devices-by-blueprint-and-tag
+  - Fleet REST API report export surfaces: https://fleetdm.com/docs/rest-api/rest-api#post-api-v1-fleet-hosts-report
 
-## Parity Gap Map (2026-02-12, Session 4)
+## Parity Gap Map (2026-02-12, Session 5)
 - Missing:
-  - No critical missing item in this just-completed locked scope.
+  - JSON-mode error taxonomy (`code`, `message`) for non-success machine-readable command failures.
+  - Exporter parity for Linux secure-boot posture in examples/schema guidance.
 - Weak:
-  - Config defaults for repeated report/evidence/db workflows are not yet available.
+  - Default strict-profile redaction posture docs for high-risk identifiers.
+  - Synthetic large-fleet benchmark evidence for `report`/`history`/`drift`.
 - Parity:
-  - Report ranking/slicing (`--sort-by`, `--top`) and noise filters (`--only-failing`, `--only-skipped`).
-  - JSON/JUnit/SARIF report outputs and machine-readable evidence verify output.
-  - Assignment-aware policy evaluation, drift/history filters, and deterministic smoke path.
-  - Evidence manifest/signature verification and signing-key lifecycle metadata.
+  - Config defaults for `db`, `report.*`, and `evidence_export.*` are now available.
+  - Policy preflight quality gate (`policy lint`) now covers schema + semantic checks before DB mutation.
+  - Assignment-aware checks/reporting, drift/history filters, and JSON/JUnit/SARIF outputs are in place.
 - Differentiator:
-  - Local-first, no-service-required evidence trust pipeline (manifest + signature + verify).
+  - Local-first evidence trust pipeline (manifest + optional signature + verify) with no hosted dependency.
 
-## Brainstormed Candidates (Ranked 2026-02-12, Session 4)
-- 1) Doctor integrity + maintenance controls (`--integrity-check`, `--vacuum`) with JSON/reporting output. Score: impact 4, effort 3, fit 5, differentiation 2, risk 2, confidence 4.
-- 2) Normalize invalid `--format` handling across CLI command surfaces. Score: impact 4, effort 2, fit 5, differentiation 1, risk 1, confidence 4.
-- 3) Assignment stale-tag detection (`policy assignments --unmatched-tags`). Score: impact 3, effort 2, fit 4, differentiation 2, risk 1, confidence 4.
-- 4) Config defaults support for `--db`/report/evidence paths. Score: impact 3, effort 4, fit 4, differentiation 2, risk 2, confidence 3.
-- 5) Security defaults for strict evidence redaction of high-risk identifiers. Score: impact 3, effort 2, fit 4, differentiation 2, risk 1, confidence 4.
-- 6) Policy lint command (`policy lint`) for pre-DB schema + semantic checks. Score: impact 3, effort 3, fit 4, differentiation 2, risk 2, confidence 3.
-- 7) Linux exporter secure-boot parity fields. Score: impact 3, effort 3, fit 3, differentiation 2, risk 2, confidence 3.
-- 8) Synthetic large-fleet benchmark and index follow-up. Score: impact 3, effort 3, fit 3, differentiation 2, risk 2, confidence 3.
-- 9) Packaging docs (Homebrew/Nix + checksum verification guidance). Score: impact 2, effort 3, fit 3, differentiation 1, risk 1, confidence 3.
-- 10) Optional read-only dashboard scaffold. Score: impact 2, effort 5, fit 3, differentiation 3, risk 3, confidence 2.
+## Brainstormed Candidates (Ranked 2026-02-12, Session 5)
+- 1) Config defaults for repeated operator workflows (`db`, `report.*`, `evidence_export.*`). Score: impact 4, effort 3, fit 5, differentiation 2, risk 2, confidence 4. (selected)
+- 2) Policy quality gate (`policy lint` with semantic checks + JSON output). Score: impact 4, effort 3, fit 5, differentiation 2, risk 2, confidence 4. (selected)
+- 3) Invalid `--format` normalization and traceback suppression consistency. Score: impact 4, effort 2, fit 5, differentiation 1, risk 1, confidence 4. (selected)
+- 4) JSON failure taxonomy (`code`, `message`) across machine-readable surfaces. Score: impact 4, effort 3, fit 4, differentiation 2, risk 2, confidence 3.
+- 5) Strict redaction defaults/trust-boundary docs for high-risk identifiers. Score: impact 3, effort 2, fit 4, differentiation 2, risk 1, confidence 4.
+- 6) Linux secure-boot exporter parity and schema guidance. Score: impact 3, effort 3, fit 4, differentiation 2, risk 2, confidence 3.
+- 7) Synthetic large-fleet benchmark + index tuning follow-up. Score: impact 3, effort 3, fit 3, differentiation 2, risk 2, confidence 3.
+- 8) Packaging docs (Homebrew/Nix + checksum verification). Score: impact 2, effort 3, fit 3, differentiation 1, risk 1, confidence 3.
 
 ## Pending Features
-- [ ] `P2` Config defaults file for `--db`/report/evidence settings.
-- [ ] `P2` Security defaults: stricter out-of-box redaction for high-risk identifiers.
-- [ ] `P3` Policy quality gate: `policy lint` for schema + semantic checks.
+- [ ] `P2` Reliability: explicit JSON failure taxonomy (`code`, `message`) for machine-readable command failures.
+- [ ] `P2` Security defaults: stricter out-of-box redaction guidance for high-risk identifiers.
 - [ ] `P3` Exporter parity: Linux secure-boot + additional schema guidance.
 - [ ] `P3` Performance: synthetic large-fleet benchmark and tuning follow-ups.
 - [ ] `P3` Packaging docs: Homebrew/Nix install + checksum verification guidance.
 - [ ] `P3` Optional read-only dashboard.
 
-## Pending Feature Check (2026-02-12, Session 3)
+## Pending Feature Check (2026-02-12, Session 5)
 - Question: What features are still pending?
-- Answer: Remaining work is now config defaults, stricter security defaults, policy lint, exporter parity, benchmark/tuning follow-up, packaging docs, and optional dashboard.
+- Answer: JSON error taxonomy, strict redaction defaults/docs, exporter parity, benchmark/tuning follow-up, packaging docs, and optional dashboard.
 
-## Cycle 1 Locked Work (This Session)
-- [x] Implement doctor maintenance parity: add `doctor --integrity-check` and optional `doctor --vacuum` flow with actionable output.
-- [x] Normalize invalid `--format` handling (consistent error text + exit code `2`) across `check`, `report`, `history`, `drift`, `doctor`, and evidence format surfaces.
-- [x] Add assignment stale-tag detection: `policy assignments --unmatched-tags`.
-- [x] Update tests/docs/trackers and run verification gates (`make check`, `make security`, `make smoke` + targeted CLI smoke).
+## Cycle 1 Locked Work (Session 5)
+- [x] Implement `policy lint` (file/directory recursive linting, semantic checks, text/json output).
+- [x] Complete config-default resolution (`db`, `report.*`, `evidence_export.*`) and wire command usage.
+- [x] Keep invalid `--format` output consistent with explicit bad value and exit code `2`.
+- [x] Harden `make security` cache-path reliability by defaulting `pip_audit` cache to a writable location (`/tmp/pip-audit-cache`).
+- [x] Update tests/docs/trackers and run local verification gates.
 
 ## Delivered Features
+- 2026-02-12: `make security` now runs `pip_audit` with configurable writable cache path (`PIP_AUDIT_CACHE_DIR`, default `/tmp/pip-audit-cache`) to avoid sandbox permission failures.
+- 2026-02-12: Config-default support shipped via `FLEETMDM_CONFIG` (or `~/.fleetmdm/config.yaml`) for `db`, report defaults, and evidence export defaults.
+- 2026-02-12: `fleetmdm policy lint` shipped with schema + semantic checks, recursive directory support, and JSON/text output.
 - 2026-02-12: `doctor` maintenance parity shipped with `--integrity-check` and `--vacuum`, including before/after maintenance metrics in JSON/table output.
-- 2026-02-12: invalid `--format` handling normalized across core/evidence surfaces with consistent validation messaging and exit code `2`.
-- 2026-02-12: assignment hygiene command shipped: `policy assignments --unmatched-tags` for stale tag assignment detection.
+- 2026-02-12: Invalid `--format` handling normalized across core/evidence surfaces with consistent validation messaging and exit code `2`.
+- 2026-02-12: Assignment hygiene command shipped: `policy assignments --unmatched-tags` for stale tag assignment detection.
 - 2026-02-12: SARIF enrichment for `report --format sarif` (`helpUri`, `fullDescription`) plus `--sarif-max-failures-per-policy` bounded failed-device samples.
 - 2026-02-12: Evidence packs now support `evidence export --history-limit N` with optional `history.json` excerpts and strict-profile device redaction consistency.
-- 2026-02-12: `report --sort-by` + `--top` triage controls, malformed `--since` validation in `history`/`drift`, and deterministic `make smoke` workflow.
 - 2026-02-11: `report --only-assigned` and drift membership deltas via `drift --include-new-missing`.
 - 2026-02-10: Python module execution parity (`python -m fleetmdm`, `python -m fleetmdm.cli`).
-- 2026-02-10: report noise filters (`--only-failing`, `--only-skipped`) and CSV hardening.
+- 2026-02-10: Report noise filters (`--only-failing`, `--only-skipped`) and CSV hardening.
 
 ## Risks And Blockers
-- No feature blockers identified for the current locked cycle.
+- No open feature blockers for this locked cycle.
 - Ongoing risk: broad CLI option growth can introduce UX inconsistency; mitigate with targeted tests + docs alignment per feature.
 - Environment-only blocker: network-restricted runtime prevents online dependency resolution for `make build` and online vulnerability lookups for `pip_audit`.
 
 ## Next Cycle Goals (Draft)
-- Add config defaults support for common report/evidence workflows.
-- Add policy quality preflight (`policy lint`) and tighten JSON-mode failure taxonomy.
+- Add JSON failure taxonomy (`code`, `message`) for machine-readable failure paths.
+- Tighten strict-profile redaction defaults/trust-boundary docs.
+- Add Linux secure-boot exporter parity and benchmark evidence for scale paths.

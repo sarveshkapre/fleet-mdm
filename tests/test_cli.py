@@ -1477,6 +1477,109 @@ def test_drift_include_new_missing_rows(tmp_path: Path) -> None:
     assert by_policy["previous-only"]["current"] == "missing"
 
 
+def test_policy_lint_valid_file_passes(tmp_path: Path) -> None:
+    policy_path = tmp_path / "policy.yaml"
+    policy_path.write_text(
+        "\n".join(
+            [
+                "id: min-os",
+                "name: Minimum OS Version",
+                "checks:",
+                "  - key: os_version",
+                "    op: version_gte",
+                "    value: \"14.0\"",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["policy", "lint", str(policy_path)])
+    assert result.exit_code == 0
+    assert "OK:" in result.stdout
+    assert "policy_id=min-os" in result.stdout
+
+
+def test_policy_lint_reports_semantic_errors(tmp_path: Path) -> None:
+    policy_path = tmp_path / "invalid-policy.yaml"
+    policy_path.write_text(
+        "\n".join(
+            [
+                "id: invalid-semantics",
+                "name: Invalid Semantics",
+                "targets:",
+                "  tags:",
+                "    - prod",
+                "    - prod",
+                "checks:",
+                "  - key: os_version",
+                "    op: regex",
+                "    value: \"[\"",
+                "  - key: disk.encrypted",
+                "    op: in",
+                "    value: true",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["policy", "lint", str(policy_path)])
+    assert result.exit_code == 1
+    assert "invalid regex pattern" in result.stdout
+    assert "value must be a non-empty list" in result.stdout
+    assert "targets.tags contains duplicate values" in result.stdout
+
+
+def test_policy_lint_directory_recursive_json_output(tmp_path: Path) -> None:
+    root = tmp_path / "policies"
+    nested = root / "nested"
+    nested.mkdir(parents=True, exist_ok=True)
+
+    valid_path = root / "valid.yaml"
+    valid_path.write_text(
+        "\n".join(
+            [
+                "id: valid",
+                "name: Valid Policy",
+                "checks:",
+                "  - key: disk.encrypted",
+                "    op: eq",
+                "    value: true",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    invalid_path = nested / "invalid.yaml"
+    invalid_path.write_text(
+        "\n".join(
+            [
+                "id: invalid",
+                "name: Invalid Policy",
+                "checks:",
+                "  - key: cpu.cores",
+                "    op: in",
+                "    value: 8",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        ["policy", "lint", str(root), "--recursive", "--format", "json"],
+    )
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["count"] == 2
+    assert payload["ok"] is False
+    by_name = {Path(item["path"]).name: item for item in payload["results"]}
+    assert by_name["valid.yaml"]["ok"] is True
+    assert by_name["invalid.yaml"]["ok"] is False
+
+
 def test_doctor_json_includes_db_stats(tmp_path: Path) -> None:
     db_path = tmp_path / "fleet.db"
     result = runner.invoke(app, ["doctor", "--db", str(db_path), "--format", "json"])
@@ -1544,7 +1647,7 @@ def test_core_commands_reject_invalid_format_consistently(tmp_path: Path) -> Non
     for args, expected_values in cases:
         result = runner.invoke(app, args)
         assert result.exit_code == 2
-        assert "Invalid --format value. Expected one of:" in result.stdout
+        assert "Invalid --format value 'invalid'. Expected one of:" in result.stdout
         assert expected_values in result.stdout
         assert "Traceback" not in result.stdout
 
@@ -1557,7 +1660,7 @@ def test_evidence_verify_rejects_invalid_format_value(tmp_path: Path) -> None:
         app, ["evidence", "verify", str(bundle_dir), "--format", "invalid"]
     )
     assert result.exit_code == 2
-    assert "Invalid --format value. Expected one of: text, json" in result.stdout
+    assert "Invalid --format value 'invalid'. Expected one of: text, json" in result.stdout
 
 
 def test_policy_assignments_unmatched_tags_lists_stale_assignments(tmp_path: Path) -> None:
@@ -1650,4 +1753,4 @@ def test_evidence_key_list_rejects_invalid_format_value(tmp_path: Path) -> None:
         ["evidence", "key", "list", "--keyring-dir", str(keyring_dir), "--format", "invalid"],
     )
     assert result.exit_code == 2
-    assert "Invalid --format value. Expected one of: table, json" in result.stdout
+    assert "Invalid --format value 'invalid'. Expected one of: table, json" in result.stdout

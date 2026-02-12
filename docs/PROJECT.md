@@ -41,6 +41,6 @@ make release
 ```
 
 ## Next 3 improvements
-1) `fleetmdm doctor` enhancements: optional integrity checks and maintenance guidance (`VACUUM`/freelist actionability).
-2) Normalize invalid `--format` handling across commands with consistent exit codes/messages.
-3) Config defaults support for `--db`, report options, and evidence export defaults.
+1) Tighten strict evidence redaction defaults for high-risk identifiers and document trust boundaries.
+2) Extend exporter parity with Linux secure-boot + additional schema guidance.
+3) Add packaging docs for Homebrew/Nix install and checksum verification guidance.
