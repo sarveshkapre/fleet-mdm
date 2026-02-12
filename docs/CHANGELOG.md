@@ -1,6 +1,9 @@
 # Changelog
 
 ## Unreleased (2026-02-10)
+- Add `fleetmdm report --sort-by name|failed|passed` and `--top N` for deterministic triage ranking/slicing.
+- Validate malformed `--since` timestamps in `history` and `drift` with clear CLI errors (exit code 2, no traceback).
+- Add `make smoke` for deterministic local workflow verification (`init`/`seed`/`report`/`check`/`history`/`drift`).
 - Add `fleetmdm report --only-assigned` to force assignment-scoped report evaluation even when no assignments exist.
 - Add `fleetmdm drift --include-new-missing` to optionally include rows present in only one of the last two runs.
 - Add `fleetmdm report --only-failing` and `--only-skipped` for noise reduction at scale.

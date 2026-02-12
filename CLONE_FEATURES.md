@@ -9,19 +9,28 @@
 ## Candidate Features To Do
 - [ ] P2 - SARIF quality: optionally emit bounded per-device failures and richer rule metadata (`helpUri`, policy descriptions). Score: impact 4, effort 3, fit 4, differentiation 2, risk 2, confidence 4.
 - [ ] P2 - Evidence packs: optionally include bounded `fleetmdm history` excerpts for audit trails. Score: impact 4, effort 3, fit 4, differentiation 3, risk 2, confidence 4.
-- [ ] P2 - Report UX: add `--sort-by failed|passed|name` and `--top N` for large-fleet triage. Score: impact 4, effort 2, fit 4, differentiation 2, risk 1, confidence 4.
-- [ ] P2 - Reliability: validate `--since` values in CLI and return clear exit code/message on malformed timestamps. Score: impact 4, effort 1, fit 5, differentiation 1, risk 1, confidence 5.
 - [ ] P2 - CI reliability: pin Python patch version in workflow matrix and add periodic dependency update policy doc. Score: impact 3, effort 2, fit 4, differentiation 1, risk 1, confidence 4.
+- [ ] P2 - CLI UX: normalize invalid `--format` handling across commands with consistent exit code/text. Score: impact 3, effort 2, fit 4, differentiation 1, risk 1, confidence 4.
+- [ ] P2 - Policy quality gate: add `fleetmdm policy lint` for schema + semantic checks without DB mutation. Score: impact 4, effort 3, fit 4, differentiation 2, risk 2, confidence 3.
+- [ ] P2 - Assignment UX: add `policy assignments --unmatched-tags` to detect stale tag assignments. Score: impact 3, effort 2, fit 4, differentiation 2, risk 1, confidence 4.
+- [ ] P2 - Security docs: add explicit threat model and trust boundaries for local-first deployment. Score: impact 3, effort 2, fit 4, differentiation 1, risk 1, confidence 4.
+- [ ] P2 - Reliability: add explicit error taxonomy (`code`, `message`) for JSON-mode failures. Score: impact 4, effort 3, fit 4, differentiation 2, risk 2, confidence 3.
 - [ ] P3 - `fleetmdm doctor` enhancements: optional `--integrity-check` and `--vacuum` guidance/automation. Score: impact 3, effort 3, fit 4, differentiation 2, risk 2, confidence 4.
 - [ ] P3 - Config file support for default `--db`, report defaults, and evidence output path. Score: impact 3, effort 4, fit 4, differentiation 2, risk 2, confidence 3.
 - [ ] P3 - Performance: add microbench for report/drift with synthetic 10k-row history and index tuning follow-ups. Score: impact 3, effort 3, fit 3, differentiation 2, risk 2, confidence 3.
 - [ ] P3 - Security: redact high-risk fact keys by default (`serial`, `uuid`, hardware IDs) in strict evidence profile metadata docs. Score: impact 3, effort 2, fit 4, differentiation 2, risk 1, confidence 4.
-- [ ] P3 - Developer experience: add `make smoke` target for deterministic local workflow verification. Score: impact 3, effort 2, fit 4, differentiation 1, risk 1, confidence 4.
 - [ ] P3 - Exporter parity: add Linux secure-boot fact collection and schema guidance in examples. Score: impact 3, effort 3, fit 3, differentiation 2, risk 2, confidence 3.
+- [ ] P3 - Exporter parity: add macOS firewall facts and bootstrap token posture fields in examples. Score: impact 3, effort 3, fit 3, differentiation 2, risk 2, confidence 3.
 - [ ] P3 - Optional read-only web dashboard for inventory/compliance/evidence verify status. Score: impact 3, effort 5, fit 3, differentiation 3, risk 3, confidence 2.
 - [ ] P3 - Packaging: provide Homebrew/Nix install docs with checksum-based release artifact verification. Score: impact 2, effort 3, fit 3, differentiation 1, risk 1, confidence 3.
+- [ ] P3 - Ops UX: add `fleetmdm report --output` for direct file artifact creation without shell redirects. Score: impact 3, effort 2, fit 3, differentiation 1, risk 1, confidence 4.
+- [ ] P3 - Ops UX: add `fleetmdm history --latest-run` shortcut for rapid post-check troubleshooting. Score: impact 2, effort 2, fit 3, differentiation 1, risk 1, confidence 4.
+- [ ] P3 - Docs quality: split long command recipes into `docs/` pages and keep README within two-screen quickstart. Score: impact 2, effort 2, fit 4, differentiation 1, risk 1, confidence 4.
 
 ## Implemented
+- [x] 2026-02-12 - Report UX for scale: add `fleetmdm report --sort-by name|failed|passed` and `--top N` for deterministic ranking/slicing. Evidence: `src/fleetmdm/cli.py`, `tests/test_cli.py`, `README.md`, `docs/CHANGELOG.md`.
+- [x] 2026-02-12 - CLI reliability hardening: validate malformed `--since` in `history` and `drift` with clear error messaging and exit code `2`. Evidence: `src/fleetmdm/cli.py`, `tests/test_cli.py`, `README.md`, `docs/CHANGELOG.md`.
+- [x] 2026-02-12 - Developer verification UX: add deterministic `make smoke` workflow (`init`/`seed`/`report`/`check`/`history`/`drift`) and document it. Evidence: `Makefile`, `README.md`, `docs/PROJECT.md`.
 - [x] 2026-02-11 - Report UX for scale: add `fleetmdm report --only-assigned` to force assignment-scoped report evaluation even when no assignments exist. Evidence: `src/fleetmdm/cli.py`, `tests/test_cli.py`, `README.md`, `docs/CHANGELOG.md`.
 - [x] 2026-02-11 - Drift UX: add `fleetmdm drift --include-new-missing` and surface `change_type` (`changed|new|missing`) in drift outputs. Evidence: `src/fleetmdm/cli.py`, `tests/test_cli.py`, `README.md`, `docs/CHANGELOG.md`.
 - [x] 2026-02-10 - Release hygiene: add `fleetmdm.__main__` so `python -m fleetmdm` works; ensure `python -m fleetmdm.cli` also runs; update `make dev` and add a smoke test. Evidence: `src/fleetmdm/__main__.py`, `src/fleetmdm/cli.py`, `Makefile`, `tests/test_cli.py`.
@@ -73,6 +82,8 @@
 - Machine-readable CLI output should bypass rich rendering (`typer.echo`) to avoid line-wrapping that can corrupt long JSON strings.
 - Treat `last_seen` as a monotonic freshness guard: normalization + stale-ingest skipping prevents accidental rollbacks when inventory is ingested out-of-order.
 - `--since` and drift filters are cheap, high-value scale features: they keep history/drift usable once you have frequent runs.
+- Sorting plus `--top` is a low-effort, high-signal triage multiplier for large policy sets; it helps operators focus on worst failures first.
+- Timestamp validation should fail fast in CLI surface area: returning a clear error message (instead of bubbling parser tracebacks) materially improves operator UX and automation reliability.
 - SARIF output makes FleetMDM results first-class in code-scanning/compliance pipelines without forcing a hosted service.
 - A lightweight `doctor` command reduces operational friction (DB size, counts, pragmas, index visibility) and makes troubleshooting repeatable.
 - Market scan signals that exportable audit artifacts and scheduled exports are baseline expectations; CLI filters + machine-readable outputs are high leverage.

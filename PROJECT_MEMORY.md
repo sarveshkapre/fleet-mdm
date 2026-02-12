@@ -1,5 +1,94 @@
 # Project Memory
 
+## 2026-02-12 - Cycle 1 - Session Notes Checkpoint (Pre-Implementation)
+- Session Goal:
+  Improve FleetMDM production readiness for large-fleet triage by adding report ranking/slicing UX, hardening timestamp-input reliability, and formalizing a deterministic smoke verification path.
+- Success Criteria:
+  - `fleetmdm report` supports deterministic `--sort-by failed|passed|name` and `--top N` across output formats.
+  - `fleetmdm history` and `fleetmdm drift` reject malformed `--since` with a clear message and non-zero exit (no traceback leak).
+  - `make smoke` runs a real local workflow successfully and is documented.
+  - Tests and verification gates pass with exact command evidence recorded.
+- Non-Goals:
+  - No dashboard implementation in this cycle.
+  - No schema migrations or DB layout changes.
+  - No CI workflow rework unless required by selected tasks.
+- Required Product Checkpoint:
+  - Are we in a good product phase yet? `No`.
+  - Rationale: FleetMDM has strong local-first core workflows, but still lacks some parity-level triage UX and operator safeguards expected in mature MDM/compliance tools.
+- Bounded Market Scan (untrusted):
+  - Intune compliance monitoring workflow expectations: dashboards/drill-down/monitor states.
+    Source: https://learn.microsoft.com/en-us/intune/intune-service/protect/compliance-policy-monitor
+  - Intune export API expectations for filtered machine-readable report data.
+    Source: https://learn.microsoft.com/en-us/intune/intune-service/fundamentals/reports-export-graph-apis
+  - Jamf compliance benchmark reporting and audit documentation expectations.
+    Source: https://support.jamf.com/en/articles/10932419-compliance-benchmarks-faq
+  - Kandji device views + sort/filter/export expectations.
+    Source: https://support.kandji.io/kb/device-views-overview
+  - Kandji Prism API expectations for automation and query surfaces.
+    Source: https://support.kandji.io/kb/prism
+  - FleetDM API-first operations baseline.
+    Source: https://fleetdm.com/docs/rest-api/rest-api
+- Parity Gap Map:
+  - Missing: report sort/top controls; explicit malformed `--since` handling; canonical smoke target.
+  - Weak: SARIF rule metadata depth; evidence history excerpts.
+  - Parity: assignment-aware reporting, JSON/JUnit/SARIF, evidence verify/signing pipeline.
+  - Differentiator: local-first signed evidence bundles with deterministic manifests.
+- Brainstormed Candidate Ranking (impact/effort/fit/differentiation/risk/confidence):
+  - `report --sort-by/--top` (5/2/5/2/1/5)
+  - `--since` validation hardening (5/1/5/1/1/5)
+  - `make smoke` deterministic path (4/2/5/1/1/5)
+  - Evidence history excerpts (4/3/4/3/2/4)
+  - SARIF metadata enrichment (4/3/4/2/2/4)
+  - Doctor integrity/vacuum guidance (3/3/4/2/2/4)
+- What features are still pending?
+  - See `PRODUCT_ROADMAP.md` and `CLONE_FEATURES.md` pending sections; highest-value pending items this cycle are report triage controls, `--since` validation, and smoke-path hardening.
+- Locked Execution List (feature lock rule):
+  - Implement `report --sort-by` and `--top` with regression tests and docs.
+  - Implement malformed `--since` validation in `history` and `drift` with tests/docs.
+  - Add `make smoke`, run it, and document behavior.
+- Trust Label:
+  `trusted` for local repository analysis; `untrusted` for external market references.
+
+## 2026-02-12 - Cycle 1 - Delivery: Report Triage + Since Validation + Smoke Target
+- Recent Decisions:
+  - 2026-02-12 | Add `report --sort-by name|failed|passed` and `--top N` for deterministic triage ranking/slicing | Large fleets need quick focus on highest-failure policies and bounded summaries | Evidence: `src/fleetmdm/cli.py`, `tests/test_cli.py`, `README.md`, `docs/CHANGELOG.md` | Commit: pending | Confidence: high | Trust label: `trusted`.
+  - 2026-02-12 | Validate malformed `--since` in `history` and `drift` via CLI-level normalization with explicit exit code `2` | Prevent traceback-style failures and provide predictable automation behavior | Evidence: `src/fleetmdm/cli.py`, `tests/test_cli.py`, `README.md` | Commit: pending | Confidence: high | Trust label: `trusted`.
+  - 2026-02-12 | Add deterministic `make smoke` workflow that executes `init`/`seed`/`report`/`check`/`history`/`drift` | Create a repeatable local production-readiness smoke path tied to touched workflows | Evidence: `Makefile`, `docs/PROJECT.md`, `README.md` | Commit: pending | Confidence: high | Trust label: `trusted`.
+- Anti-Drift Checks:
+  - Confirmed scope remained aligned to locked cycle list only (report triage UX, `--since` reliability, smoke verification path).
+  - Deferred non-locked candidates (SARIF enrichment, evidence history excerpts, doctor maintenance flags) back to backlog.
+- Verification Evidence:
+  - `make lint` -> pass.
+  - `make typecheck` -> pass.
+  - `make test` -> pass (`44 passed`).
+  - `PYTHONPATH=src .venv/bin/python -m pytest -q tests/test_cli.py -k 'report_sort_by_failed_and_top_limit or rejects_invalid_sort_by_value or history_rejects_malformed_since or drift_rejects_malformed_since'` -> pass.
+  - `make smoke` -> pass.
+  - Manual smoke (new flags + validation):
+    ```bash
+    tmpdir=$(mktemp -d)
+    db="$tmpdir/fleet.db"
+    .venv/bin/python -m fleetmdm init --db "$db"
+    .venv/bin/python -m fleetmdm seed --db "$db"
+    .venv/bin/python -m fleetmdm report --db "$db" --format json --sort-by failed --top 1
+    .venv/bin/python -m fleetmdm history --db "$db" --since bad-ts
+    ```
+    Result: pass for report output; expected validation error shown for malformed `--since`.
+  - `make check` -> partial fail (build step only; isolated build environment could not download `hatchling` due restricted network/DNS in sandbox).
+  - `.venv/bin/python -m build --no-isolation` -> fail (`hatchling.build` unavailable in current venv; dependency install blocked by restricted network).
+  - `.venv/bin/python -m bandit -q -r src` -> pass.
+  - `make security` / `pip_audit` -> fail in sandbox (legacy cache permission on `~/.pip-audit-cache`; with `HOME=/tmp`, network to `pypi.org` unavailable).
+- Mistakes And Fixes:
+  - Root cause: none in feature implementation.
+  - Environment issue: security/build commands require network-accessible dependency metadata or preinstalled backend packages not available in this sandbox.
+  - Prevention rule: continue recording partial-gate outcomes explicitly and run full security/build in CI or network-enabled environment.
+- What changed and why:
+  - Added operator-focused report ranking controls and bounded outputs to improve triage speed.
+  - Added early timestamp validation to improve reliability and clear UX for automation scripts.
+  - Added an explicit smoke path to keep release-readiness checks repeatable.
+- What remains next:
+  - Highest pending parity features: SARIF metadata enrichment and bounded evidence history excerpts.
+  - Reliability follow-up: unify error-code/message behavior across all command `--format` and input-validation paths.
+
 ## 2026-02-11 - Cycle 1 - Assignment-Scoped Reporting + Drift Membership Deltas
 - Recent Decisions:
   Ship two roadmap items together: add `fleetmdm report --only-assigned` to force assignment-scoped report evaluation, and add `fleetmdm drift --include-new-missing` to include policy/device pairs present in only one of the compared runs.

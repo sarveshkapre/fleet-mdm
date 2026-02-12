@@ -10,6 +10,11 @@ make setup
 make dev
 ```
 
+## Smoke
+```bash
+make smoke
+```
+
 ## Tests
 ```bash
 make test

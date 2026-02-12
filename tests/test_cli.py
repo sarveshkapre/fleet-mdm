@@ -766,6 +766,98 @@ def test_report_only_assigned_forces_assignment_scope(tmp_path: Path) -> None:
     assert int(forced_rows_after_assign[0]["failed_count"]) == 0
 
 
+def test_report_sort_by_failed_and_top_limit(tmp_path: Path) -> None:
+    db_path = tmp_path / "fleet.db"
+    failing_policy_path = tmp_path / "failing-policy.yaml"
+    skipped_policy_path = tmp_path / "skipped-policy.yaml"
+
+    failing_policy_path.write_text(
+        "\n".join(
+            [
+                "id: disk-fail",
+                "name: Disk Must Be Disabled",
+                "checks:",
+                "  - key: disk.encrypted",
+                "    op: eq",
+                "    value: false",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    skipped_policy_path.write_text(
+        "\n".join(
+            [
+                "id: windows-only",
+                "name: Windows Only Policy",
+                "targets:",
+                "  os: windows",
+                "checks:",
+                "  - key: os_version",
+                "    op: version_gte",
+                "    value: \"1.0\"",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    assert runner.invoke(app, ["seed", "--db", str(db_path)]).exit_code == 0
+    assert (
+        runner.invoke(
+            app, ["policy", "add", str(failing_policy_path), "--db", str(db_path)]
+        ).exit_code
+        == 0
+    )
+    assert (
+        runner.invoke(
+            app, ["policy", "add", str(skipped_policy_path), "--db", str(db_path)]
+        ).exit_code
+        == 0
+    )
+
+    sorted_result = runner.invoke(
+        app, ["report", "--db", str(db_path), "--format", "json", "--sort-by", "failed"]
+    )
+    assert sorted_result.exit_code == 0
+    sorted_rows = json.loads(sorted_result.stdout)
+    assert [row["policy_id"] for row in sorted_rows] == [
+        "disk-fail",
+        "min-os-version",
+        "windows-only",
+    ]
+
+    top_result = runner.invoke(
+        app,
+        [
+            "report",
+            "--db",
+            str(db_path),
+            "--format",
+            "json",
+            "--sort-by",
+            "failed",
+            "--top",
+            "2",
+        ],
+    )
+    assert top_result.exit_code == 0
+    top_rows = json.loads(top_result.stdout)
+    assert len(top_rows) == 2
+    assert [row["policy_id"] for row in top_rows] == ["disk-fail", "min-os-version"]
+
+
+def test_report_rejects_invalid_sort_by_value(tmp_path: Path) -> None:
+    db_path = tmp_path / "fleet.db"
+    result = runner.invoke(
+        app,
+        ["report", "--db", str(db_path), "--sort-by", "priority"],
+    )
+    assert result.exit_code == 2
+    assert "Invalid --sort-by value" in result.stdout
+    assert "Traceback" not in result.stdout
+
+
 def test_history_since_filters_rows(tmp_path: Path) -> None:
     db_path = tmp_path / "fleet.db"
     init_db(db_path)
@@ -837,6 +929,17 @@ def test_history_since_filters_rows(tmp_path: Path) -> None:
     assert len(rows) == 1
     assert rows[0]["status"] == "fail"
     assert rows[0]["checked_at"].startswith("2026-02-03T00:00:00")
+
+
+def test_history_rejects_malformed_since(tmp_path: Path) -> None:
+    db_path = tmp_path / "fleet.db"
+    result = runner.invoke(
+        app,
+        ["history", "--db", str(db_path), "--since", "definitely-not-iso8601"],
+    )
+    assert result.exit_code == 2
+    assert "Invalid --since timestamp" in result.stdout
+    assert "Traceback" not in result.stdout
 
 
 def test_drift_supports_since_and_policy_filters(tmp_path: Path) -> None:
@@ -945,6 +1048,17 @@ def test_drift_supports_since_and_policy_filters(tmp_path: Path) -> None:
     assert rows[0]["policy_id"] == "disk-encryption"
     assert rows[0]["previous"] == "pass"
     assert rows[0]["current"] == "fail"
+
+
+def test_drift_rejects_malformed_since(tmp_path: Path) -> None:
+    db_path = tmp_path / "fleet.db"
+    result = runner.invoke(
+        app,
+        ["drift", "--db", str(db_path), "--since", "not-a-timestamp"],
+    )
+    assert result.exit_code == 2
+    assert "Invalid --since timestamp" in result.stdout
+    assert "Traceback" not in result.stdout
 
 
 def test_drift_device_filter_limits_output(tmp_path: Path) -> None:

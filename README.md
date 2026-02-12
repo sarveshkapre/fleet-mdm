@@ -77,6 +77,7 @@ fleetmdm report --format junit > report.xml
 fleetmdm report --policy disk-encryption
 fleetmdm report --only-failing
 fleetmdm report --only-skipped
+fleetmdm report --sort-by failed --top 10
 fleetmdm report --only-assigned
 fleetmdm drift --device mac-001
 fleetmdm drift --include-new-missing
@@ -99,6 +100,7 @@ Use `fleetmdm report --only-assigned` to force assignment-scoped reporting even 
 - Recent results: `fleetmdm history --device mac-001 --limit 20`
 - Since timestamp: `fleetmdm history --device mac-001 --since 2026-02-01T00:00:00Z`
 - Filter by policy: `fleetmdm history --policy disk-encryption`
+- Malformed `--since` values return a clear CLI error with exit code `2`.
 
 ### Drift
 - Compare last two runs: `fleetmdm drift`
@@ -140,6 +142,11 @@ facts_allowlist:
 ```bash
 docker build -t fleetmdm .
 docker run --rm -it -v $PWD/data:/data fleetmdm --db /data/fleet.db init
+```
+
+## Local smoke
+```bash
+make smoke
 ```
 
 ## Security notes

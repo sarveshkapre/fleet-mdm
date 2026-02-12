@@ -421,6 +421,24 @@ def _parse_iso8601(value: str | None) -> datetime | None:
         return None
 
 
+def _normalize_since_option(value: str | None) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    dt = _parse_iso8601(text)
+    if dt is None:
+        console.print(
+            "Invalid --since timestamp. Expected ISO8601 "
+            "(example: 2026-02-01T00:00:00Z)"
+        )
+        raise typer.Exit(code=2)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).isoformat()
+
+
 def _keyring_manifest_path(keyring_dir: Path) -> Path:
     return keyring_dir / "keyring.json"
 
@@ -995,6 +1013,10 @@ def report(
     format: str = typer.Option("table", "--format", help="table/json/csv/junit/sarif"),
     device_id: str | None = OPT_DEVICE_OPTIONAL,
     policy_id: str | None = OPT_POLICY_ID_OPTIONAL,
+    sort_by: str = typer.Option("name", "--sort-by", help="name|failed|passed"),
+    top: int = typer.Option(
+        0, "--top", min=0, help="Limit rows after sorting (0 means all rows)"
+    ),
     only_assigned: bool = typer.Option(
         False,
         "--only-assigned",
@@ -1011,6 +1033,11 @@ def report(
     db: str | None = OPT_DB,
 ) -> None:
     """Summary compliance report across devices."""
+    normalized_sort_by = (sort_by or "").strip().lower()
+    if normalized_sort_by not in {"name", "failed", "passed"}:
+        console.print("Invalid --sort-by value. Expected one of: name, failed, passed")
+        raise typer.Exit(code=2)
+
     if only_failing and only_skipped:
         console.print("Options --only-failing and --only-skipped are mutually exclusive")
         raise typer.Exit(code=1)
@@ -1091,6 +1118,35 @@ def report(
             and int(row.get("passed_count", 0) or 0) == 0
         ]
 
+    if normalized_sort_by == "failed":
+        filtered.sort(
+            key=lambda row: (
+                -int(row.get("failed_count", 0) or 0),
+                -int(row.get("passed_count", 0) or 0),
+                str(row.get("policy_name", "")).casefold(),
+                str(row.get("policy_id", "")).casefold(),
+            )
+        )
+    elif normalized_sort_by == "passed":
+        filtered.sort(
+            key=lambda row: (
+                -int(row.get("passed_count", 0) or 0),
+                int(row.get("failed_count", 0) or 0),
+                str(row.get("policy_name", "")).casefold(),
+                str(row.get("policy_id", "")).casefold(),
+            )
+        )
+    else:
+        filtered.sort(
+            key=lambda row: (
+                str(row.get("policy_name", "")).casefold(),
+                str(row.get("policy_id", "")).casefold(),
+            )
+        )
+
+    if top > 0:
+        filtered = filtered[:top]
+
     if format == "json":
         console.print(json.dumps(filtered, indent=2))
         return
@@ -1135,10 +1191,11 @@ def history(
     db: str | None = OPT_DB,
 ) -> None:
     """Show compliance history."""
+    normalized_since = _normalize_since_option(since)
     db_path = resolve_db_path(db)
     init_db(db_path)
     with connect(db_path) as conn:
-        rows = list_compliance_history(conn, device_id, policy_id, limit, since=since)
+        rows = list_compliance_history(conn, device_id, policy_id, limit, since=normalized_since)
 
     if format == "json":
         console.print(json.dumps([dict(row) for row in rows], indent=2))
@@ -1207,11 +1264,12 @@ def drift(
     """Compare the last two compliance runs and show status changes."""
     normalized_policy_id = (policy_id or "").strip() or None
     normalized_device_id = (device_id or "").strip() or None
+    normalized_since = _normalize_since_option(since)
 
     db_path = resolve_db_path(db)
     init_db(db_path)
     with connect(db_path) as conn:
-        runs = list_recent_runs(conn, 2, since=since)
+        runs = list_recent_runs(conn, 2, since=normalized_since)
         if len(runs) < 2:
             console.print("Need at least two compliance runs to calculate drift")
             raise typer.Exit(code=1)
