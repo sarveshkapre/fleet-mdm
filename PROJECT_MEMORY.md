@@ -140,7 +140,7 @@
   - Fix: switched to `rc` for exit-code capture.
   - Prevention rule: avoid shell-reserved names (`status`, `pipestatus`, etc.) in scripted verification snippets.
 - Commit:
-  `TBD`.
+  `d7cce76`, `616604f`.
 - Confidence:
   High on local CLI behavior/tests; medium on full release gate because build and online vulnerability lookup are blocked by network constraints.
 - Trust Label:
