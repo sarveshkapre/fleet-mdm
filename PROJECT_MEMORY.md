@@ -172,6 +172,77 @@
 - Trust Label:
   `trusted` (local code/tests/smoke).
 
+## 2026-02-12 - Cycle 1 - Session 5C (Final Verification Addendum)
+- Verification Evidence:
+  - `make lint` (pass)
+  - `make typecheck` (pass)
+  - `make test` (pass, `58 passed`)
+  - `make smoke` (pass)
+  - `make security` (fail: DNS/network restriction resolving `pypi.org`; cache-path permission issue is fixed)
+  - `make build` (fail: offline dependency resolution for `hatchling>=1.24.0`)
+  - `make check` (partial pass: lint/type/test pass; build fails from same offline dependency resolution)
+  - Config-default + `policy lint` smoke (pass):
+    ```bash
+    tmpdir=$(mktemp -d)
+    trap 'rm -rf "$tmpdir"' EXIT
+    cat > "$tmpdir/config.yaml" <<YAML
+    db: $tmpdir/fleet.db
+    report:
+      format: json
+      sort_by: failed
+      top: 1
+    evidence_export:
+      output: $tmpdir/evidence
+      redaction_profile: strict
+      history_limit: 1
+    YAML
+    FLEETMDM_CONFIG="$tmpdir/config.yaml" .venv/bin/python -m fleetmdm seed >/dev/null
+    FLEETMDM_CONFIG="$tmpdir/config.yaml" .venv/bin/python -m fleetmdm report > "$tmpdir/report.json"
+    FLEETMDM_CONFIG="$tmpdir/config.yaml" .venv/bin/python -m fleetmdm evidence export >/dev/null
+    mkdir -p "$tmpdir/policies/nested"
+    cat > "$tmpdir/policies/ok.yaml" <<YAML
+    id: ok
+    name: ok
+    checks:
+      - key: disk.encrypted
+        op: eq
+        value: true
+    YAML
+    cat > "$tmpdir/policies/nested/bad.yaml" <<YAML
+    id: bad
+    name: bad
+    checks:
+      - key: os_version
+        op: regex
+        value: "["
+    YAML
+    set +e
+    .venv/bin/python -m fleetmdm policy lint "$tmpdir/policies" --recursive --format json > "$tmpdir/lint.json"
+    lint_rc=$?
+    set -e
+    python3 - <<'PY' "$tmpdir/report.json" "$tmpdir/lint.json" "$lint_rc"
+    import json, sys
+    report = json.load(open(sys.argv[1]))
+    lint = json.load(open(sys.argv[2]))
+    lint_rc = int(sys.argv[3])
+    assert isinstance(report, list) and len(report) == 1
+    assert lint["count"] == 2
+    assert lint_rc == 1
+    assert any(not r["ok"] for r in lint["results"])
+    print("smoke-ok")
+    PY
+    ```
+- Mistakes And Fixes:
+  - Root cause: an initial smoke script used reserved zsh variable name `status`.
+  - Fix: reran the smoke script with `lint_rc` for command exit capture.
+  - Prevention rule: avoid reserved shell variable names in verification scripts.
+- Commit:
+  `pending`
+- Confidence:
+  High.
+- Trust Label:
+  `trusted` (local verification only).
+
 ## 2026-02-12 - Cycle 1 - Session 4 (Pre-Implementation Checkpoint)
 - Session Notes:
   - Goal: ship the remaining locked M3 reliability/parity work for doctor maintenance controls, format-validation consistency, and stale assignment hygiene.
