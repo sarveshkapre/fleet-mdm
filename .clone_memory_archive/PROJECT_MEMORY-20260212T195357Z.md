@@ -1,8 +1,371 @@
 # Project Memory
 
 ## Historical Summary
-- 2026-02-12T19:53:57Z: compacted memory from 788 lines. Full snapshot archived at /Users/sarvesh/code/fleet-mdm/.clone_memory_archive/PROJECT_MEMORY-20260212T195357Z.md
+- 2026-02-12T18:10:33Z: compacted memory from 504 lines. Full snapshot archived at /Users/sarvesh/code/fleet-mdm/.clone_memory_archive/PROJECT_MEMORY-20260212T181033Z.md
 
+- Mistakes And Fixes:
+  - Environment constraint: `pip_audit` default cache path was not writable inside sandbox.
+  - Remediation: run `pip_audit` with explicit writable cache dir (`--cache-dir /tmp/pip-audit-cache`) and record offline-network limitation separately.
+- Commit:
+  `a61da2c`.
+- Confidence:
+  High on feature behavior and tests; medium on full release gate due network-restricted build/security dependency resolution.
+- Trust Label:
+  `trusted` for local edits/tests/smoke, `untrusted` for external references.
+
+## 2026-02-12 - Cycle 1 - Session 5 (Pre-Implementation Checkpoint)
+- Session Notes:
+  - Goal: ship the highest-impact pending M3 items by finalizing config defaults and delivering `policy lint`.
+  - Success Criteria:
+    - Config defaults are honored for `db`, `report`, and `evidence_export`, with CLI flags taking precedence.
+    - `fleetmdm policy lint` supports file/directory inputs, optional recursion, and text/json output with semantic validation.
+    - Verification gates (`make lint`, `make typecheck`, `make test`, `make smoke`) pass and docs/trackers are updated.
+  - Non-goals:
+    - Optional dashboard work.
+    - New exporter feature collection work.
+    - Packaging/release automation expansion.
+  - Planned Tasks (locked for this cycle):
+    - Complete config-default resolution helpers and apply them across CLI command surfaces.
+    - Implement/verify `policy lint` schema + semantic checks and machine-readable output.
+    - Keep invalid `--format` behavior consistent (`exit 2`, clear message, no traceback).
+    - Update roadmap/feature/memory docs and record exact verification evidence.
+- Product phase checkpoint:
+  - Are we in a good product phase yet? `No`.
+  - Best-in-market references (bounded, untrusted):
+    - Microsoft Intune compliance monitoring: https://learn.microsoft.com/en-us/intune/intune-service/protect/compliance-policy-monitor
+    - Microsoft Intune export report APIs: https://learn.microsoft.com/en-us/intune/intune-service/fundamentals/reports-export-graph-apis
+    - Jamf compliance benchmark workflows: https://www.jamf.com/blog/how-to-build-compliance-benchmarks-for-your-organization/
+    - Kandji managed-device custom reports by blueprint/tag: https://support.kandji.io/kb/create-custom-reports-with-managed-devices-by-blueprint-and-tag
+    - Fleet REST API report export endpoint expectations: https://fleetdm.com/docs/rest-api/rest-api#post-api-v1-fleet-hosts-report
+- Gap map (session 5):
+  - Missing: explicit JSON failure taxonomy (`code`, `message`) for machine-readable non-success paths.
+  - Weak: strict redaction defaults/trust-boundary guidance; Linux secure-boot exporter parity.
+  - Parity: config defaults and policy preflight linting after this cycle.
+  - Differentiator: local-first evidence trust pipeline (manifest/sign/verify).
+- Ranked candidate scoring (impact, effort, fit, differentiation, risk, confidence):
+  - 1) Config defaults (`db`, `report.*`, `evidence_export.*`): 4,3,5,2,2,4. (selected)
+  - 2) Policy lint command with semantic checks: 4,3,5,2,2,4. (selected)
+  - 3) Invalid `--format` consistency hardening: 4,2,5,1,1,4. (selected)
+  - 4) JSON failure taxonomy: 4,3,4,2,2,3.
+  - 5) Strict redaction defaults docs: 3,2,4,2,1,4.
+- What features are still pending?
+  - From `PRODUCT_ROADMAP.md`: JSON failure taxonomy, stricter redaction defaults/docs, exporter parity, performance benchmarking, packaging docs, dashboard.
+  - From `CLONE_FEATURES.md`: 20+ pending backlog candidates remain after locking this cycle.
+- Planned verification commands:
+  - `make lint`
+  - `make typecheck`
+  - `make test`
+  - `make smoke`
+  - `make security`
+  - `make check`
+  - `make build`
+- Trust Label:
+  `trusted` for local planning/code context; `untrusted` for external market references.
+
+## 2026-02-12 - Cycle 1 - Session 5 (Implementation: Policy Lint + Config Defaults)
+- Recent Decisions:
+  - Finish the locked scope (`policy lint` + config defaults) before taking additional roadmap work.
+  - Keep CLI override precedence for every config defaulted option.
+  - Harden `make security` so environment cache permissions do not fail early.
+- Why:
+  - `policy lint` catches policy defects before runtime compliance checks.
+  - Config defaults reduce repeated operator flags while preserving deterministic automation.
+  - Security checks should fail only for meaningful reasons, not cache-path permissions.
+- What changed:
+  - Added `fleetmdm policy lint` with file/directory input, optional `--recursive`, and `--format text|json`.
+  - Added semantic lint checks for invalid regex patterns, invalid `in`/`not_in` value shape, invalid target shapes, and duplicate-tag warnings.
+  - Added config defaults loading from `~/.fleetmdm/config.yaml` or `FLEETMDM_CONFIG`.
+  - Added config-driven defaults for DB resolution across CLI commands and for `report`/`evidence export` option sets.
+  - Kept invalid `--format` message shape consistent and ensured tests enforce it.
+  - Updated `Makefile` `security` target to run `pip_audit` with writable default cache dir (`PIP_AUDIT_CACHE_DIR`, default `/tmp/pip-audit-cache`).
+  - Updated docs: README quickstart behavior, changelog, roadmap/project docs, and trackers.
+- Verification Evidence:
+  - `make lint` (pass)
+  - `make typecheck` (pass)
+  - `make test` (pass, `58 passed`)
+  - `make smoke` (pass)
+  - `make security` (fail: DNS/network restriction resolving `pypi.org`; no cache-permission failure after Makefile update)
+  - `.venv/bin/python -m bandit -q -r src` (pass)
+  - `make build` (fail: offline dependency resolution for `hatchling>=1.24.0`)
+  - `make check` (partial pass: lint/type/test pass; build fails from same offline dependency resolution)
+  - Local config/lint smoke (pass):
+    ```bash
+    tmpdir=$(mktemp -d)
+    config="$tmpdir/fleet-config.yaml"
+    db="$tmpdir/fleet.db"
+    policy="$tmpdir/policy.yaml"
+    invalid_dir="$tmpdir/policies"
+    mkdir -p "$invalid_dir/nested"
+    # writes valid/invalid policies and config defaults
+    # runs seed/report/check/evidence export/policy lint
+    # validates report/lint JSON payloads
+    # prints: smoke-ok
+    rm -rf "$tmpdir"
+    ```
+- Mistakes And Fixes:
+  - Root cause: `make security` used `pip_audit` defaults that touched an unwritable cache location in this sandbox.
+  - Fix: parameterized cache path in `Makefile` using `PIP_AUDIT_CACHE_DIR` defaulting to `/tmp/pip-audit-cache`.
+  - Prevention rule: keep security-tool cache/output paths explicitly writable in automation targets.
+- Commit:
+  `64f6c74`
+- Confidence:
+  High on local feature behavior/tests; medium on release-gate completeness due network-restricted build/audit calls.
+- Trust Label:
+  `trusted` for local code/tests/smoke; `untrusted` for market references.
+
+## 2026-02-12 - Cycle 1 - Session 5B (Stabilization Verification Addendum)
+- Recent Decisions:
+  - Preserve locked scope and avoid new feature expansion while repairing intermediate local breakage in `src/fleetmdm/cli.py`.
+  - Re-verify with focused smoke for the exact touched flows (`policy lint` and config defaults).
+- Why:
+  - Intermediate local edits briefly left the tree in a broken state; the highest-impact action was restoring deterministic behavior and proving it with repeatable checks.
+- Verification Evidence:
+  - `make lint` (pass)
+  - `make typecheck` (pass)
+  - `.venv/bin/python -m pytest -q` (pass, `58 passed`)
+  - Local smoke (pass, validated config defaults + policy lint payload semantics):
+    ```bash
+    tmpdir=$(mktemp -d)
+    trap 'rm -rf "$tmpdir"' EXIT
+    cat > "$tmpdir/config.yaml" <<'YAML'
+    db: "$tmpdir/fleet.db"
+    report:
+      format: json
+      sort_by: failed
+      top: 1
+    evidence_export:
+      output: "$tmpdir/evidence"
+      redaction_profile: strict
+      history_limit: 1
+    YAML
+    FLEETMDM_CONFIG="$tmpdir/config.yaml" .venv/bin/python -m fleetmdm seed >/dev/null
+    FLEETMDM_CONFIG="$tmpdir/config.yaml" .venv/bin/python -m fleetmdm report >/tmp/fleetmdm-config-report.json
+    FLEETMDM_CONFIG="$tmpdir/config.yaml" .venv/bin/python -m fleetmdm check --device mac-001 --format json >/dev/null
+    FLEETMDM_CONFIG="$tmpdir/config.yaml" .venv/bin/python -m fleetmdm evidence export >/dev/null
+    mkdir -p "$tmpdir/policies/nested"
+    cat > "$tmpdir/policies/valid.yaml" <<'YAML'
+    id: min-os
+    name: Minimum OS Version
+    checks:
+      - key: os_version
+        op: version_gte
+        value: "14.0"
+    YAML
+    cat > "$tmpdir/policies/nested/invalid.yaml" <<'YAML'
+    id: bad
+    name: Bad Regex
+    checks:
+      - key: os_version
+        op: regex
+        value: "["
+    YAML
+    .venv/bin/python -m fleetmdm policy lint "$tmpdir/policies" --recursive --format json >/tmp/fleetmdm-policy-lint.json
+    ```
+- Mistakes And Fixes:
+  - Root cause: one smoke attempt used `python` from PATH, which was unavailable in this shell.
+  - Fix: reran verification with explicit `.venv/bin/python`.
+  - Prevention rule: use explicit virtualenv interpreter paths in documented smoke commands.
+- Commit:
+  `64f6c74`
+- Confidence:
+  High.
+- Trust Label:
+  `trusted` (local code/tests/smoke).
+
+## 2026-02-12 - Cycle 1 - Session 5C (Final Verification Addendum)
+- Verification Evidence:
+  - `make lint` (pass)
+  - `make typecheck` (pass)
+  - `make test` (pass, `58 passed`)
+  - `make smoke` (pass)
+  - `make security` (fail: DNS/network restriction resolving `pypi.org`; cache-path permission issue is fixed)
+  - `make build` (fail: offline dependency resolution for `hatchling>=1.24.0`)
+  - `make check` (partial pass: lint/type/test pass; build fails from same offline dependency resolution)
+  - Config-default + `policy lint` smoke (pass):
+    ```bash
+    tmpdir=$(mktemp -d)
+    trap 'rm -rf "$tmpdir"' EXIT
+    cat > "$tmpdir/config.yaml" <<YAML
+    db: $tmpdir/fleet.db
+    report:
+      format: json
+      sort_by: failed
+      top: 1
+    evidence_export:
+      output: $tmpdir/evidence
+      redaction_profile: strict
+      history_limit: 1
+    YAML
+    FLEETMDM_CONFIG="$tmpdir/config.yaml" .venv/bin/python -m fleetmdm seed >/dev/null
+    FLEETMDM_CONFIG="$tmpdir/config.yaml" .venv/bin/python -m fleetmdm report > "$tmpdir/report.json"
+    FLEETMDM_CONFIG="$tmpdir/config.yaml" .venv/bin/python -m fleetmdm evidence export >/dev/null
+    mkdir -p "$tmpdir/policies/nested"
+    cat > "$tmpdir/policies/ok.yaml" <<YAML
+    id: ok
+    name: ok
+    checks:
+      - key: disk.encrypted
+        op: eq
+        value: true
+    YAML
+    cat > "$tmpdir/policies/nested/bad.yaml" <<YAML
+    id: bad
+    name: bad
+    checks:
+      - key: os_version
+        op: regex
+        value: "["
+    YAML
+    set +e
+    .venv/bin/python -m fleetmdm policy lint "$tmpdir/policies" --recursive --format json > "$tmpdir/lint.json"
+    lint_rc=$?
+    set -e
+    python3 - <<'PY' "$tmpdir/report.json" "$tmpdir/lint.json" "$lint_rc"
+    import json, sys
+    report = json.load(open(sys.argv[1]))
+    lint = json.load(open(sys.argv[2]))
+    lint_rc = int(sys.argv[3])
+    assert isinstance(report, list) and len(report) == 1
+    assert lint["count"] == 2
+    assert lint_rc == 1
+    assert any(not r["ok"] for r in lint["results"])
+    print("smoke-ok")
+    PY
+    ```
+- Mistakes And Fixes:
+  - Root cause: an initial smoke script used reserved zsh variable name `status`.
+  - Fix: reran the smoke script with `lint_rc` for command exit capture.
+  - Prevention rule: avoid reserved shell variable names in verification scripts.
+- Commit:
+  `pending`
+- Confidence:
+  High.
+- Trust Label:
+  `trusted` (local verification only).
+
+## 2026-02-12 - Cycle 1 - Session 4 (Pre-Implementation Checkpoint)
+- Session Notes:
+  - Goal: ship the remaining locked M3 reliability/parity work for doctor maintenance controls, format-validation consistency, and stale assignment hygiene.
+  - Success Criteria:
+    - `fleetmdm doctor` supports `--integrity-check` and optional `--vacuum` with explicit text/JSON reporting.
+    - Invalid `--format` values return consistent error text and exit code `2` across `check`, `report`, `history`, `drift`, `doctor`, `evidence key list`, and `evidence verify`.
+    - `fleetmdm policy assignments --unmatched-tags` surfaces stale tag assignments with clear operator output.
+    - Verification gates (`make check`, `make security`, `make smoke`) and targeted CLI smoke pass and are recorded.
+  - Non-goals:
+    - No dashboard/UI work in this session.
+    - No config defaults file work in this session.
+    - No schema redesign or non-roadmap expansion.
+  - Planned Tasks (locked for this cycle):
+    - Implement `doctor --integrity-check` and `doctor --vacuum`.
+    - Normalize invalid-format behavior across targeted command surfaces.
+    - Add `policy assignments --unmatched-tags`.
+    - Update tests/docs/trackers and run full verification commands.
+- Product phase checkpoint:
+  - Are we in a good product phase yet? `No`.
+  - Best-in-market baseline references (bounded, untrusted):
+    - Intune compliance monitor baseline: https://learn.microsoft.com/en-us/intune/intune-service/protect/compliance-policy-monitor
+    - Intune export report APIs baseline: https://learn.microsoft.com/en-us/intune/intune-service/fundamentals/reports-export-graph-apis
+    - Jamf compliance benchmark workflow expectations: https://www.jamf.com/blog/how-to-build-compliance-benchmarks-for-your-organization/
+    - Kandji filtered managed-device custom reports by tag/blueprint: https://support.kandji.io/kb/create-custom-reports-with-managed-devices-by-blueprint-and-tag
+    - Fleet structured report export API expectations: https://fleetdm.com/docs/rest-api/rest-api#post-api-v1-fleet-hosts-report
+- Gap map (session 4):
+  - Missing: stale tag assignment visibility in assignment tooling.
+  - Weak: doctor maintenance execution flow and format-validation consistency across commands.
+  - Parity: assignment-aware report/drift/history behavior and machine-readable evidence/report outputs.
+  - Differentiator: local-first evidence trust pipeline with deterministic manifests and signature verification.
+- Ranked candidate scoring (impact, effort, fit, differentiation, risk, confidence):
+  - 1) Doctor maintenance parity (`--integrity-check`, `--vacuum`): 4,3,5,2,2,4.
+  - 2) CLI invalid `--format` normalization: 4,2,5,1,1,4.
+  - 3) Assignment stale-tag detection (`policy assignments --unmatched-tags`): 3,2,4,2,1,4.
+  - 4) Config defaults support (deferred): 3,4,4,2,2,3.
+  - 5) Policy lint command (deferred): 3,3,4,2,2,3.
+- What features are still pending?
+  - From `PRODUCT_ROADMAP.md`: doctor enhancements, format normalization, assignment stale-tag detection, config defaults, stricter redaction defaults, policy lint, exporter parity, performance benchmarking, packaging docs, dashboard.
+  - From `CLONE_FEATURES.md`: 20+ pending backlog items remain after locking this cycle.
+- Planned verification commands:
+  - `make check`
+  - `make security`
+  - `make smoke`
+  - targeted CLI smoke for `doctor` and `policy assignments --unmatched-tags`.
+- Trust Label:
+  `trusted` for local repo planning; `untrusted` for external market references.
+
+## 2026-02-12 - Cycle 1 - Session 3 (Pre-Implementation Checkpoint)
+- Session Notes:
+  - Goal: close the highest-impact remaining reliability/parity gaps in FleetMDM CLI workflows for doctor maintenance and format validation consistency.
+  - Success Criteria:
+    - `fleetmdm doctor` supports optional integrity execution and optional `VACUUM` maintenance with clear text/JSON reporting.
+    - Invalid `--format` inputs fail consistently (clear error + exit code `2`) across targeted command surfaces.
+    - Tests and verification gates (`make check`, `make security`, `make smoke`, targeted CLI smoke) pass and are recorded.
+  - Non-goals:
+    - No read-only dashboard work this session.
+    - No config defaults file implementation this session.
+    - No schema/storage redesign beyond targeted reliability updates.
+  - Planned Tasks (locked for this cycle):
+    - Implement doctor parity features (`--integrity-check`, `--vacuum`) and wire JSON/table output.
+    - Normalize invalid `--format` behavior across `check`, `report`, `history`, `drift`, `doctor`, `evidence key list`, and `evidence verify`.
+    - Add `policy assignments --unmatched-tags` stale assignment detection.
+    - Update tests/docs/trackers and execute verification gates.
+- Product phase checkpoint:
+  - Are we in a good product phase yet? `No`.
+  - Best-in-market baseline references (bounded, untrusted):
+    - Intune compliance monitor workflow: https://learn.microsoft.com/en-us/intune/intune-service/protect/compliance-policy-monitor
+    - Intune export report APIs: https://learn.microsoft.com/en-us/intune/intune-service/fundamentals/reports-export-graph-apis
+    - Jamf compliance benchmark/audit workflow expectations: https://support.jamf.com/en/articles/10932419-compliance-benchmarks-faq
+    - Kandji filtered managed-device reports by blueprint/tag: https://support.kandji.io/kb/create-custom-reports-with-managed-devices-by-blueprint-and-tag
+    - Fleet REST API report export endpoint: https://fleetdm.com/docs/rest-api/rest-api#post-api-v1-fleet-hosts-report
+- Gap map (session 3):
+  - Missing: no critical missing parity item in current locked scope.
+  - Weak: doctor maintenance workflow (`integrity_check`/`VACUUM`) and invalid `--format` consistency.
+  - Parity: assignment-aware reporting, drift/history filters, SARIF/JUnit/JSON outputs, evidence trust pipeline.
+  - Differentiator: local-first audit evidence with manifest + signature verify.
+- What features are still pending?
+  - From `PRODUCT_ROADMAP.md`: doctor enhancements, format normalization, stale tag detection, config defaults, stricter security defaults, exporter parity, benchmarking, packaging docs, dashboard.
+  - From `CLONE_FEATURES.md`: 20+ candidate backlog items remain after locking this cycle.
+- Planned verification commands:
+  - `make check`
+  - `make security`
+  - `make smoke`
+  - targeted CLI smoke for new flags/paths.
+- Trust Label:
+  `trusted` for local repo analysis/planning; `untrusted` for external market references.
+
+## 2026-02-12 - Cycle 1 - Session 3 (Implementation: Doctor Maintenance + Format Parity)
+- Recent Decisions:
+  - Keep execution locked to doctor maintenance parity and cross-command format validation consistency; treat assignment stale-tag visibility as already-shipped code and verify it with smoke evidence instead of re-implementing.
+  - Refactor doctor metrics collection through a single snapshot helper to reduce drift between before/after maintenance reporting.
+- Why:
+  - The highest-impact open reliability gaps were operational DB remediation and predictable CLI automation failures on invalid formats.
+- What changed:
+  - Added/standardized `_normalize_choice_option` usage across `check`, `report`, `history`, `drift`, `doctor`, `evidence key list`, and `evidence verify`.
+  - Hardened `doctor` maintenance flow: optional `--integrity-check`, optional `--vacuum`, before/after freelist/page/size metrics, reclaimed-bytes reporting, and clearer maintenance warnings.
+  - Added regression tests for doctor maintenance JSON output and invalid-format behavior across core/evidence command surfaces.
+  - Verified stale tag assignment output (`policy assignments --unmatched-tags`) and updated roadmap/feature trackers to reflect delivered status.
+- Verification Evidence:
+  - `make check` (partial pass: lint/type/tests passed; build step failed in network-restricted environment when resolving `hatchling>=1.24.0`).
+  - `.venv/bin/python -m pip_audit --cache-dir /tmp/pip-audit-cache` (failed: DNS/network restriction to `pypi.org`).
+  - `.venv/bin/python -m bandit -q -r src` (pass).
+  - `make smoke` (pass).
+  - Targeted doctor/format smoke (pass):
+    ```bash
+    tmpdir=$(mktemp -d)
+    db="$tmpdir/fleet.db"
+    .venv/bin/python -m fleetmdm seed --db "$db" >/dev/null
+    .venv/bin/python -m fleetmdm doctor --db "$db" --format json --integrity-check --vacuum >/dev/null
+    .venv/bin/python -m fleetmdm report --db "$db" --format invalid >/tmp/fleetmdm-invalid-format.txt 2>&1
+    test "$?" -eq 2
+    rm -rf "$tmpdir"
+    ```
+  - Targeted assignment-hygiene smoke (pass):
+    ```bash
+    tmpdir=$(mktemp -d)
+    db="$tmpdir/fleet.db"
+    .venv/bin/python -m fleetmdm seed --db "$db" >/dev/null
+    .venv/bin/python -m fleetmdm policy assign min-os-version --tag nonexistent --db "$db" >/dev/null
+    .venv/bin/python -m fleetmdm policy assignments --db "$db" --unmatched-tags >/tmp/fleetmdm-unmatched-tags.txt
+    rm -rf "$tmpdir"
+    ```
+- Mistakes And Fixes:
   - Root cause: used reserved/read-only `status` shell variable during smoke scripting in `zsh`.
   - Fix: switched to `rc` for exit-code capture.
   - Prevention rule: avoid shell-reserved names (`status`, `pipestatus`, etc.) in scripted verification snippets.
