@@ -71,6 +71,7 @@ fleetmdm policy assign disk-encryption --device mac-001
 fleetmdm check --device mac-001
 fleetmdm report --format json
 fleetmdm report --format sarif > report.sarif
+fleetmdm report --format sarif --sarif-max-failures-per-policy 20 > report.sarif
 fleetmdm report --format junit > report.xml
 
 # Scale/noise reduction
@@ -115,6 +116,7 @@ Use `fleetmdm report --only-assigned` to force assignment-scoped reporting even 
 
 ### Evidence Packs
 - Export SOC-style evidence artifacts: `fleetmdm evidence export --output evidence/`
+- Include bounded history excerpts in evidence packs: `fleetmdm evidence export --output evidence/ --history-limit 200`
 - Redaction profiles: `--redact-profile none|minimal|strict`
 - Policy YAML redaction in evidence packs: `strict` redacts `raw_yaml`; `minimal` strips comment-only lines.
 - Additional facts redaction: `--redact-config ./redact.yml` (YAML/JSON allowlist/denylist for `facts.*`)
@@ -126,7 +128,7 @@ Use `fleetmdm report --only-assigned` to force assignment-scoped reporting even 
 - Verify with rotated keys: `fleetmdm evidence verify evidence/ --keyring-dir ./keys`
 - Machine-readable verification: `fleetmdm evidence verify evidence/ --format json`
 - Write machine-readable verification to a file: `fleetmdm evidence verify evidence/ --keyring-dir ./keys --format json --output verify.json`
-- Bundle includes: `metadata.json`, `inventory.json`, `policies.json`, `assignments.json`, `latest_run.json`, `drift.json`, `manifest.json` and optional `signature.json`
+- Bundle includes: `metadata.json`, `inventory.json`, `policies.json`, `assignments.json`, `latest_run.json`, `drift.json`, `manifest.json`, optional `history.json`, and optional `signature.json`
 
 Example `redact.yml`:
 ```yaml

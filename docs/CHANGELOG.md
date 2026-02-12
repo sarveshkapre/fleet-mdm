@@ -1,6 +1,9 @@
 # Changelog
 
 ## Unreleased (2026-02-10)
+- Enrich `report --format sarif` with rule `helpUri`/`fullDescription` metadata.
+- Add `report --sarif-max-failures-per-policy N` to include bounded failed-device samples in SARIF results.
+- Add `evidence export --history-limit N` to optionally include bounded `history.json` excerpts in evidence bundles.
 - Add `fleetmdm report --sort-by name|failed|passed` and `--top N` for deterministic triage ranking/slicing.
 - Validate malformed `--since` timestamps in `history` and `drift` with clear CLI errors (exit code 2, no traceback).
 - Add `make smoke` for deterministic local workflow verification (`init`/`seed`/`report`/`check`/`history`/`drift`).

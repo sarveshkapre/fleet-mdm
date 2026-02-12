@@ -123,6 +123,12 @@ OPT_REDACT_CONFIG = typer.Option(
     readable=True,
     help="YAML/JSON file with additional redactions for evidence inventory facts",
 )
+OPT_HISTORY_LIMIT = typer.Option(
+    0,
+    "--history-limit",
+    min=0,
+    help="Include up to N most recent compliance history rows in evidence export (0 disables)",
+)
 OPT_EVIDENCE_KEY_OUTPUT = typer.Option(None, "--output", help="Path to write signing key")
 OPT_FORCE = typer.Option(False, "--force", help="Overwrite output file if it exists")
 OPT_VERIFY_FORMAT = typer.Option("text", "--format", help="text/json")
@@ -329,7 +335,14 @@ def _apply_redaction_profile(
     device_assignments: Sequence[dict[str, str]],
     latest_run: dict[str, Any],
     drift_changes: Sequence[dict[str, str]],
-) -> tuple[list[dict[str, Any]], list[dict[str, str]], dict[str, Any], list[dict[str, str]]]:
+    history_rows: Sequence[dict[str, Any]],
+) -> tuple[
+    list[dict[str, Any]],
+    list[dict[str, str]],
+    dict[str, Any],
+    list[dict[str, str]],
+    list[dict[str, Any]],
+]:
     device_map: dict[str, str] = {}
 
     def redact_device_id(value: str) -> str:
@@ -366,7 +379,21 @@ def _apply_redaction_profile(
         row["device_id"] = redact_device_id(str(row["device_id"]))
         redacted_drift.append(row)
 
-    return redacted_inventory, redacted_assignments, redacted_latest_run, redacted_drift
+    redacted_history: list[dict[str, Any]] = []
+    for entry in history_rows:
+        row = dict(entry)
+        device_id = str(row.get("device_id", "")).strip()
+        if device_id:
+            row["device_id"] = redact_device_id(device_id)
+        redacted_history.append(row)
+
+    return (
+        redacted_inventory,
+        redacted_assignments,
+        redacted_latest_run,
+        redacted_drift,
+        redacted_history,
+    )
 
 
 def _build_manifest(
@@ -1017,6 +1044,12 @@ def report(
     top: int = typer.Option(
         0, "--top", min=0, help="Limit rows after sorting (0 means all rows)"
     ),
+    sarif_max_failures_per_policy: int = typer.Option(
+        0,
+        "--sarif-max-failures-per-policy",
+        min=0,
+        help="For SARIF only: include up to N failed device IDs per policy result (0 disables)",
+    ),
     only_assigned: bool = typer.Option(
         False,
         "--only-assigned",
@@ -1072,12 +1105,18 @@ def report(
             raise typer.Exit(code=1)
 
         summary: dict[str, dict[str, Any]] = {}
+        sarif_context: dict[str, dict[str, Any]] = {}
         for policy in policy_rows:
-            summary[policy["policy_id"]] = {
-                "policy_id": policy["policy_id"],
-                "policy_name": policy["name"],
+            policy_id_value = str(policy["policy_id"])
+            summary[policy_id_value] = {
+                "policy_id": policy_id_value,
+                "policy_name": str(policy["name"]),
                 "passed_count": 0,
                 "failed_count": 0,
+            }
+            sarif_context[policy_id_value] = {
+                "policy_description": str(policy["description"] or "").strip(),
+                "failed_devices": [],
             }
         selected_policy_ids = {str(policy["policy_id"]) for policy in policy_rows}
 
@@ -1106,6 +1145,7 @@ def report(
                     summary[pid_text]["passed_count"] += 1
                 else:
                     summary[pid_text]["failed_count"] += 1
+                    sarif_context[pid_text]["failed_devices"].append(str(device["device_id"]))
 
     filtered = list(summary.values())
     if only_failing:
@@ -1169,7 +1209,22 @@ def report(
         typer.echo(render_junit_summary(filtered), nl=False)
         return
     if format == "sarif":
-        typer.echo(render_sarif_summary(filtered), nl=False)
+        sarif_rows: list[dict[str, Any]] = []
+        for row in filtered:
+            context = sarif_context.get(str(row["policy_id"]), {})
+            sarif_rows.append(
+                {
+                    **row,
+                    "policy_description": str(context.get("policy_description", "") or "").strip(),
+                    "failed_devices": list(context.get("failed_devices", [])),
+                }
+            )
+        typer.echo(
+            render_sarif_summary(
+                sarif_rows, max_failures_per_policy=sarif_max_failures_per_policy
+            ),
+            nl=False,
+        )
         return
 
     table = Table(title="Compliance Summary")
@@ -1649,6 +1704,7 @@ def evidence_export(
     output: Path | None = OPT_EVIDENCE_OUTPUT,
     redaction_profile: str = OPT_REDACT_PROFILE,
     redact_config: Path | None = OPT_REDACT_CONFIG,
+    history_limit: int = OPT_HISTORY_LIMIT,
     signing_key_file: Path | None = OPT_SIGNING_KEY_FILE,
     db: str | None = OPT_DB,
 ) -> None:
@@ -1712,6 +1768,7 @@ def evidence_export(
         runs = list_recent_runs(conn, 2)
         latest_run: dict[str, Any] = {}
         drift_changes: list[dict[str, str]] = []
+        history_excerpt: list[dict[str, Any]] = []
         if runs:
             latest_run_id = str(runs[0]["run_id"])
             latest_results = [dict(row) for row in list_results_for_run(conn, latest_run_id)]
@@ -1724,18 +1781,24 @@ def evidence_export(
                 previous_run_id = str(runs[1]["run_id"])
                 previous_results = list_results_for_run(conn, previous_run_id)
                 drift_changes = _compute_drift_changes(latest_results, previous_results)
+        if history_limit > 0:
+            history_excerpt = [
+                dict(row) for row in list_compliance_history(conn, None, None, history_limit)
+            ]
 
     (
         redacted_inventory,
         redacted_device_assignments,
         redacted_latest_run,
         redacted_drift_changes,
+        redacted_history_excerpt,
     ) = _apply_redaction_profile(
         profile,
         inventory,
         device_assignments,
         latest_run,
         drift_changes,
+        history_excerpt,
     )
     redacted_inventory = _redact_inventory_facts(redacted_inventory, facts_redaction)
 
@@ -1745,12 +1808,14 @@ def evidence_export(
     elif profile == "strict":
         policies_raw_yaml = "redacted"
 
-    total_artifacts = 7 + (1 if signing_key_file else 0)
+    total_artifacts = 7 + (1 if history_limit > 0 else 0) + (1 if signing_key_file else 0)
     metadata = {
         "generated_at": generated_at,
         "db_path": str(db_path),
         "redaction_profile": profile,
         "policies_raw_yaml": policies_raw_yaml,
+        "history_excerpt_limit": history_limit,
+        "history_excerpt_count": len(redacted_history_excerpt),
         "facts_redaction": (
             None
             if not facts_redaction
@@ -1774,6 +1839,8 @@ def evidence_export(
         "latest_run.json": redacted_latest_run,
         "drift.json": redacted_drift_changes,
     }
+    if history_limit > 0:
+        artifacts["history.json"] = redacted_history_excerpt
     for name, payload in artifacts.items():
         _write_json_artifact(output_dir / name, payload)
 
@@ -1787,6 +1854,8 @@ def evidence_export(
         _write_json_artifact(output_dir / "signature.json", signature)
 
     message = f"Wrote evidence pack to {output_dir} (redaction={profile})"
+    if history_limit > 0:
+        message += f", history={len(redacted_history_excerpt)}"
     if signing_key_file:
         message += ", signed"
     console.print(message)

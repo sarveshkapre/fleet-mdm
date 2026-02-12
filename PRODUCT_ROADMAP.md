@@ -20,22 +20,19 @@
 ## Current Milestone
 - `M3 Reliability + Scale UX`
 
-## Product Phase Checkpoint (2026-02-12)
+## Product Phase Checkpoint (2026-02-12, Session 2)
 - Are we in a good product phase yet? `No`.
 - Best-in-market references (bounded market scan, untrusted):
   - Microsoft Intune compliance monitoring emphasizes dashboard + drill-down + monitor workflows: https://learn.microsoft.com/en-us/intune/intune-service/protect/compliance-policy-monitor
   - Microsoft Intune report export APIs emphasize automation-ready filtered exports: https://learn.microsoft.com/en-us/intune/intune-service/fundamentals/reports-export-graph-apis
   - Jamf compliance benchmarks highlight audit/report exports and audit documentation expectations: https://support.jamf.com/en/articles/10932419-compliance-benchmarks-faq
-  - Kandji device views emphasize sort/filter/export workflows: https://support.kandji.io/kb/device-views-overview
-  - Kandji Prism documents API-first query/filter/export posture: https://support.kandji.io/kb/prism
-  - FleetDM positions API + CLI automation as baseline operations model: https://fleetdm.com/docs/rest-api/rest-api
+  - Kandji reporting emphasizes filtered reporting workflows for managed devices: https://support.kandji.io/kb/create-custom-reports-with-managed-devices-by-blueprint-and-tag
+  - FleetDM compliance dashboard and automation docs reinforce per-device findings and exportability as baseline UX: https://fleetdm.com/docs/using-fleet/mdm/compliance-dashboard
 
-## Parity Gap Map (2026-02-12)
+## Parity Gap Map (2026-02-12, Session 2)
 - Missing:
-  - No critical missing parity items in the locked cycle scope.
+  - No critical missing parity items in current locked scope.
 - Weak:
-  - SARIF metadata depth and bounded per-device context.
-  - Evidence packs missing bounded history excerpts for auditors.
   - Doctor maintenance workflow guidance (`VACUUM`/integrity checks).
 - Parity:
   - Report ranking/slicing (`--sort-by`, `--top`) for triage workflows.
@@ -49,20 +46,18 @@
   - Local-first, no-service-required evidence trust pipeline (manifest + signature + verify).
 
 ## Brainstormed Candidates (Ranked 2026-02-12)
-- 1) Report triage controls (`--sort-by`, `--top`). Score: impact 5, effort 2, fit 5, differentiation 2, risk 1, confidence 5.
-- 2) Strict CLI `--since` validation with clear error messages. Score: impact 5, effort 1, fit 5, differentiation 1, risk 1, confidence 5.
-- 3) Deterministic `make smoke` workflow. Score: impact 4, effort 2, fit 5, differentiation 1, risk 1, confidence 5.
-- 4) Evidence export with bounded history excerpts. Score: impact 4, effort 3, fit 4, differentiation 3, risk 2, confidence 4.
-- 5) SARIF enrichment (`helpUri`, richer rule metadata, optional per-device failures cap). Score: impact 4, effort 3, fit 4, differentiation 2, risk 2, confidence 4.
-- 6) Doctor integrity maintenance flags. Score: impact 3, effort 3, fit 4, differentiation 2, risk 2, confidence 4.
-- 7) Config file support for defaults. Score: impact 3, effort 4, fit 4, differentiation 2, risk 2, confidence 3.
+- 1) SARIF enrichment (`helpUri`, richer rule metadata, optional per-device failures cap). Score: impact 5, effort 3, fit 5, differentiation 2, risk 2, confidence 4.
+- 2) Evidence export with bounded history excerpts. Score: impact 5, effort 3, fit 5, differentiation 3, risk 2, confidence 4.
+- 3) Doctor integrity maintenance flags. Score: impact 3, effort 3, fit 4, differentiation 2, risk 2, confidence 4.
+- 4) Config file support for defaults. Score: impact 3, effort 4, fit 4, differentiation 2, risk 2, confidence 3.
+- 5) Strict evidence default redaction for serial/hardware IDs. Score: impact 3, effort 2, fit 4, differentiation 2, risk 1, confidence 4.
+- 6) CLI invalid `--format` normalization across commands. Score: impact 3, effort 2, fit 4, differentiation 1, risk 1, confidence 4.
+- 7) Assignment stale-tag detection (`policy assignments --unmatched-tags`). Score: impact 3, effort 2, fit 4, differentiation 2, risk 1, confidence 4.
 - 8) Synthetic performance bench + index tuning follow-up. Score: impact 3, effort 3, fit 3, differentiation 2, risk 2, confidence 3.
-- 9) Strict evidence default redaction for serial/hardware IDs. Score: impact 3, effort 2, fit 4, differentiation 2, risk 1, confidence 4.
-- 10) Exporter secure-boot parity. Score: impact 3, effort 3, fit 3, differentiation 2, risk 2, confidence 3.
+- 9) Exporter secure-boot parity. Score: impact 3, effort 3, fit 3, differentiation 2, risk 2, confidence 3.
+- 10) Packaging docs (Homebrew/Nix + checksum guidance). Score: impact 2, effort 3, fit 3, differentiation 1, risk 1, confidence 3.
 
 ## Pending Features
-- [ ] `P2` SARIF quality: bounded per-device failures and richer `rule` metadata.
-- [ ] `P2` Evidence packs: optional bounded `history` excerpts.
 - [ ] `P2` Doctor enhancements: `--integrity-check` and maintenance guidance.
 - [ ] `P2` Config defaults file for `--db`/report/evidence settings.
 - [ ] `P2` Security defaults: stricter out-of-box redaction for high-risk identifiers.
@@ -72,11 +67,13 @@
 - [ ] `P3` Optional read-only dashboard.
 
 ## Cycle 1 Locked Work (This Session)
-- [x] Implement report triage controls (`--sort-by`, `--top`) with tests/docs.
-- [x] Implement `--since` validation for history/drift with tests/docs.
-- [x] Add `make smoke` and document/run it as part of verification evidence.
+- [x] Implement SARIF quality upgrade: richer rule metadata + optional bounded per-device failure context.
+- [x] Implement evidence export bounded history excerpts via `--history-limit`.
+- [x] Update tests/docs/trackers and run verification gates (`make check`, `make security`, `make smoke` + targeted CLI smoke).
 
 ## Delivered Features
+- 2026-02-12: SARIF enrichment for `report --format sarif` (`helpUri`, `fullDescription`) plus `--sarif-max-failures-per-policy` bounded failed-device samples.
+- 2026-02-12: Evidence packs now support `evidence export --history-limit N` with optional `history.json` excerpts and strict-profile device redaction consistency.
 - 2026-02-12: `report --sort-by` + `--top` triage controls, malformed `--since` validation in `history`/`drift`, and deterministic `make smoke` workflow.
 - 2026-02-11: `report --only-assigned` and drift membership deltas via `drift --include-new-missing`.
 - 2026-02-10: Python module execution parity (`python -m fleetmdm`, `python -m fleetmdm.cli`).
@@ -87,6 +84,6 @@
 - Ongoing risk: broad CLI option growth can introduce UX inconsistency; mitigate with targeted tests + docs alignment per feature.
 
 ## Next Cycle Goals (Draft)
-- Deliver SARIF metadata depth improvements.
-- Add evidence-history excerpt export option with size bounds.
-- Decide whether dashboard work remains justified after CLI parity improvements.
+- Deliver doctor integrity/maintenance guidance improvements.
+- Normalize CLI invalid-format error behavior across command surfaces.
+- Add config defaults support for common report/evidence workflows.

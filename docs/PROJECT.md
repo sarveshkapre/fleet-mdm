@@ -41,6 +41,6 @@ make release
 ```
 
 ## Next 3 improvements
-1) SARIF quality: optionally emit per-device failures (bounded) and include richer SARIF rule metadata (descriptions, help URIs).
-2) Evidence packs: optionally include bounded `fleetmdm history` excerpts for audit trails.
-3) `fleetmdm doctor` enhancements: optional integrity checks and maintenance guidance (`VACUUM`/freelist actionability).
+1) `fleetmdm doctor` enhancements: optional integrity checks and maintenance guidance (`VACUUM`/freelist actionability).
+2) Normalize invalid `--format` handling across commands with consistent exit codes/messages.
+3) Config defaults support for `--db`, report options, and evidence export defaults.

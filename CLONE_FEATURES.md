@@ -7,8 +7,6 @@
 - Gaps found during codebase exploration
 
 ## Candidate Features To Do
-- [ ] P2 - SARIF quality: optionally emit bounded per-device failures and richer rule metadata (`helpUri`, policy descriptions). Score: impact 4, effort 3, fit 4, differentiation 2, risk 2, confidence 4.
-- [ ] P2 - Evidence packs: optionally include bounded `fleetmdm history` excerpts for audit trails. Score: impact 4, effort 3, fit 4, differentiation 3, risk 2, confidence 4.
 - [ ] P2 - CI reliability: pin Python patch version in workflow matrix and add periodic dependency update policy doc. Score: impact 3, effort 2, fit 4, differentiation 1, risk 1, confidence 4.
 - [ ] P2 - CLI UX: normalize invalid `--format` handling across commands with consistent exit code/text. Score: impact 3, effort 2, fit 4, differentiation 1, risk 1, confidence 4.
 - [ ] P2 - Policy quality gate: add `fleetmdm policy lint` for schema + semantic checks without DB mutation. Score: impact 4, effort 3, fit 4, differentiation 2, risk 2, confidence 3.
@@ -28,6 +26,8 @@
 - [ ] P3 - Docs quality: split long command recipes into `docs/` pages and keep README within two-screen quickstart. Score: impact 2, effort 2, fit 4, differentiation 1, risk 1, confidence 4.
 
 ## Implemented
+- [x] 2026-02-12 - SARIF parity upgrade: enrich SARIF rule metadata (`helpUri`, `fullDescription`) and add `report --sarif-max-failures-per-policy` for bounded failed-device samples. Evidence: `src/fleetmdm/report.py`, `src/fleetmdm/cli.py`, `tests/test_cli.py`, `README.md`, `docs/CHANGELOG.md`.
+- [x] 2026-02-12 - Evidence parity upgrade: add `evidence export --history-limit N` with optional `history.json` excerpts and strict redaction consistency for history device IDs. Evidence: `src/fleetmdm/cli.py`, `tests/test_cli.py`, `README.md`, `docs/CHANGELOG.md`.
 - [x] 2026-02-12 - Report UX for scale: add `fleetmdm report --sort-by name|failed|passed` and `--top N` for deterministic ranking/slicing. Evidence: `src/fleetmdm/cli.py`, `tests/test_cli.py`, `README.md`, `docs/CHANGELOG.md`.
 - [x] 2026-02-12 - CLI reliability hardening: validate malformed `--since` in `history` and `drift` with clear error messaging and exit code `2`. Evidence: `src/fleetmdm/cli.py`, `tests/test_cli.py`, `README.md`, `docs/CHANGELOG.md`.
 - [x] 2026-02-12 - Developer verification UX: add deterministic `make smoke` workflow (`init`/`seed`/`report`/`check`/`history`/`drift`) and document it. Evidence: `Makefile`, `README.md`, `docs/PROJECT.md`.
@@ -85,7 +85,9 @@
 - Sorting plus `--top` is a low-effort, high-signal triage multiplier for large policy sets; it helps operators focus on worst failures first.
 - Timestamp validation should fail fast in CLI surface area: returning a clear error message (instead of bubbling parser tracebacks) materially improves operator UX and automation reliability.
 - SARIF output makes FleetMDM results first-class in code-scanning/compliance pipelines without forcing a hosted service.
+- SARIF consumers benefit from metadata depth (`helpUri`, richer descriptions) and bounded device samples; this keeps scanner output actionable without unbounded payload growth.
 - A lightweight `doctor` command reduces operational friction (DB size, counts, pragmas, index visibility) and makes troubleshooting repeatable.
+- Optional bounded evidence history excerpts reduce auditor context switches while preserving artifact-size control.
 - Market scan signals that exportable audit artifacts and scheduled exports are baseline expectations; CLI filters + machine-readable outputs are high leverage.
 - CSV exports are a frequent audit artifact; protecting against spreadsheet formula injection is a cheap, high-signal hardening step (especially when inventory/policy strings are untrusted inputs).
 

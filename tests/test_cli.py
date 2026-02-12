@@ -80,6 +80,47 @@ def test_evidence_export_writes_artifacts(tmp_path: Path) -> None:
     assert verify.exit_code == 0
 
 
+def test_evidence_export_history_excerpt_limit_and_redaction(tmp_path: Path) -> None:
+    db_path = tmp_path / "fleet.db"
+    output_dir = tmp_path / "evidence-history"
+
+    assert runner.invoke(app, ["seed", "--db", str(db_path)]).exit_code == 0
+    assert (
+        runner.invoke(app, ["check", "--device", "mac-001", "--db", str(db_path)]).exit_code == 0
+    )
+    assert (
+        runner.invoke(app, ["check", "--device", "linux-001", "--db", str(db_path)]).exit_code
+        == 0
+    )
+
+    export = runner.invoke(
+        app,
+        [
+            "evidence",
+            "export",
+            "--db",
+            str(db_path),
+            "--output",
+            str(output_dir),
+            "--history-limit",
+            "1",
+            "--redact-profile",
+            "strict",
+        ],
+    )
+    assert export.exit_code == 0
+    assert (output_dir / "history.json").exists()
+
+    metadata = json.loads((output_dir / "metadata.json").read_text(encoding="utf-8"))
+    manifest = json.loads((output_dir / "manifest.json").read_text(encoding="utf-8"))
+    history = json.loads((output_dir / "history.json").read_text(encoding="utf-8"))
+    assert metadata["history_excerpt_limit"] == 1
+    assert metadata["history_excerpt_count"] == 1
+    assert manifest["artifact_count"] == 7
+    assert len(history) == 1
+    assert history[0]["device_id"].startswith("device-")
+
+
 def test_evidence_export_strict_redaction_profile(tmp_path: Path) -> None:
     db_path = tmp_path / "fleet.db"
     output_dir = tmp_path / "evidence-strict"
@@ -550,6 +591,7 @@ def test_report_sarif_format_emits_results(tmp_path: Path) -> None:
             [
                 "id: disk-encryption",
                 "name: Disk Encryption Enabled",
+                "description: Devices must have disk encryption enabled",
                 "checks:",
                 "  - key: disk.encrypted",
                 "    op: eq",
@@ -574,9 +616,69 @@ def test_report_sarif_format_emits_results(tmp_path: Path) -> None:
     assert "runs" in sarif and sarif["runs"]
     run = sarif["runs"][0]
     assert run["tool"]["driver"]["name"] == "FleetMDM"
+    rules = run["tool"]["driver"]["rules"]
+    disk_rule = next(rule for rule in rules if rule["id"] == "disk-encryption")
+    assert disk_rule["helpUri"] == "fleetmdm://policy/disk-encryption"
+    assert "disk encryption" in disk_rule["fullDescription"]["text"].lower()
     results = run["results"]
     assert len(results) == 1
     assert results[0]["ruleId"] == "disk-encryption"
+    assert "relatedLocations" not in results[0]
+
+
+def test_report_sarif_max_failures_per_policy_includes_bounded_device_sample(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "fleet.db"
+    policy_path = tmp_path / "policy.yaml"
+
+    policy_path.write_text(
+        "\n".join(
+            [
+                "id: cpu-min",
+                "name: CPU Minimum 64 Cores",
+                "description: Require at least 64 CPU cores",
+                "checks:",
+                "  - key: cpu.cores",
+                "    op: gte",
+                "    value: 64",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    assert runner.invoke(app, ["seed", "--db", str(db_path)]).exit_code == 0
+    assert (
+        runner.invoke(app, ["policy", "add", str(policy_path), "--db", str(db_path)]).exit_code
+        == 0
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "report",
+            "--db",
+            str(db_path),
+            "--format",
+            "sarif",
+            "--sarif-max-failures-per-policy",
+            "1",
+        ],
+    )
+    assert result.exit_code == 0
+
+    sarif = json.loads(result.stdout)
+    run = sarif["runs"][0]
+    cpu_result = next(item for item in run["results"] if item["ruleId"] == "cpu-min")
+    props = cpu_result["properties"]
+    assert props["failed_devices"] == 2
+    assert props["failed_devices_sample_count"] == 1
+    assert props["failed_devices_sample_truncated"] is True
+    assert len(props["failed_devices_sample"]) == 1
+    assert cpu_result["relatedLocations"][0]["physicalLocation"]["artifactLocation"][
+        "uri"
+    ].startswith("fleetmdm://device/")
 
 
 def test_report_policy_filter_limits_output(tmp_path: Path) -> None:

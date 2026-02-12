@@ -6,6 +6,7 @@ from collections.abc import Iterable
 from datetime import datetime, timezone
 from io import StringIO
 from typing import Any
+from urllib.parse import quote
 from xml.etree import ElementTree as ET  # nosec
 
 from rich.console import Console
@@ -131,7 +132,9 @@ def render_junit_summary(summary: Iterable[dict[str, Any]]) -> str:
     return f"{xml_bytes.decode('utf-8')}\n"
 
 
-def render_sarif_summary(summary: Iterable[dict[str, Any]]) -> str:
+def render_sarif_summary(
+    summary: Iterable[dict[str, Any]], max_failures_per_policy: int = 0
+) -> str:
     """
     Render a minimal SARIF v2.1.0 report for CI/code-scanning style ingestion.
 
@@ -142,11 +145,25 @@ def render_sarif_summary(summary: Iterable[dict[str, Any]]) -> str:
     rules: list[dict[str, Any]] = []
     results: list[dict[str, Any]] = []
 
+    bounded_failures = max(0, int(max_failures_per_policy or 0))
+
     for row in rows:
         policy_id = str(row.get("policy_id", ""))
         policy_name = str(row.get("policy_name", ""))
+        policy_description = str(row.get("policy_description", "") or "").strip()
+        policy_help_uri = str(row.get("policy_help_uri", "") or "").strip()
         passed = int(row.get("passed_count", 0) or 0)
         failed = int(row.get("failed_count", 0) or 0)
+        failed_devices_raw = row.get("failed_devices", [])
+        failed_devices: list[str] = []
+        if isinstance(failed_devices_raw, list):
+            for item in failed_devices_raw:
+                device_id = str(item or "").strip()
+                if device_id:
+                    failed_devices.append(device_id)
+        if not policy_help_uri:
+            policy_ref = quote(policy_id or policy_name or "policy", safe="")
+            policy_help_uri = f"fleetmdm://policy/{policy_ref}"
 
         if not policy_id and not policy_name:
             continue
@@ -156,28 +173,56 @@ def render_sarif_summary(summary: Iterable[dict[str, Any]]) -> str:
                 "id": policy_id or policy_name,
                 "name": policy_name or policy_id or "policy",
                 "shortDescription": {"text": policy_name or policy_id or "Policy"},
+                "fullDescription": {
+                    "text": policy_description or policy_name or policy_id or "Policy"
+                },
+                "helpUri": policy_help_uri,
             }
         )
 
         if failed <= 0:
             continue
 
-        results.append(
-            {
-                "ruleId": policy_id or policy_name or "policy",
-                "level": "error",
-                "message": {
-                    "text": f"{policy_name or policy_id} failed on {failed} device(s)."
-                },
-                "locations": [
+        rule_ref = quote(policy_id or policy_name or "policy", safe="")
+        properties: dict[str, Any] = {"failed_devices": failed, "passed_devices": passed}
+        related_locations: list[dict[str, Any]] = []
+        if bounded_failures > 0 and failed_devices:
+            sampled_devices = failed_devices[:bounded_failures]
+            properties["failed_devices_sample"] = sampled_devices
+            properties["failed_devices_sample_count"] = len(sampled_devices)
+            properties["failed_devices_sample_truncated"] = (
+                len(sampled_devices) < len(failed_devices)
+            )
+            for idx, device_id in enumerate(sampled_devices, start=1):
+                device_ref = quote(device_id, safe="")
+                related_locations.append(
                     {
+                        "id": idx,
+                        "message": {"text": f"Failed device: {device_id}"},
                         "physicalLocation": {
-                            "artifactLocation": {"uri": "fleetmdm://compliance"}
-                        }
+                            "artifactLocation": {"uri": f"fleetmdm://device/{device_ref}"}
+                        },
                     }
-                ],
-                "properties": {"failed_devices": failed, "passed_devices": passed},
-            }
+                )
+
+        result_payload: dict[str, Any] = {
+            "ruleId": policy_id or policy_name or "policy",
+            "level": "error",
+            "message": {"text": f"{policy_name or policy_id} failed on {failed} device(s)."},
+            "locations": [
+                {
+                    "physicalLocation": {
+                        "artifactLocation": {"uri": f"fleetmdm://policy/{rule_ref}"}
+                    }
+                }
+            ],
+            "properties": properties,
+        }
+        if related_locations:
+            result_payload["relatedLocations"] = related_locations
+
+        results.append(
+            result_payload
         )
 
     sarif: dict[str, Any] = {
