@@ -556,7 +556,38 @@ def _parse_iso8601(value: str | None) -> datetime | None:
         return None
 
 
-def _normalize_since_option(value: str | None) -> str | None:
+def _json_error_payload(
+    code: str, message: str, details: Mapping[str, Any] | None = None
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "schema_version": 1,
+        "ok": False,
+        "error": {
+            "code": code,
+            "message": message,
+        },
+    }
+    if details:
+        payload["error"]["details"] = dict(details)
+    return payload
+
+
+def _exit_with_error(
+    *,
+    message: str,
+    error_code: str,
+    exit_code: int = 1,
+    json_output: bool = False,
+    details: Mapping[str, Any] | None = None,
+) -> None:
+    if json_output:
+        typer.echo(_json_payload_text(_json_error_payload(error_code, message, details)), nl=False)
+    else:
+        console.print(message)
+    raise typer.Exit(code=exit_code)
+
+
+def _normalize_since_option(value: str | None, *, json_output: bool = False) -> str | None:
     if value is None:
         return None
     text = str(value).strip()
@@ -564,11 +595,15 @@ def _normalize_since_option(value: str | None) -> str | None:
         return None
     dt = _parse_iso8601(text)
     if dt is None:
-        console.print(
-            "Invalid --since timestamp. Expected ISO8601 "
-            "(example: 2026-02-01T00:00:00Z)"
+        _exit_with_error(
+            message=(
+                "Invalid --since timestamp. Expected ISO8601 "
+                "(example: 2026-02-01T00:00:00Z)"
+            ),
+            error_code="invalid_since",
+            exit_code=2,
+            json_output=json_output,
         )
-        raise typer.Exit(code=2)
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc).isoformat()
@@ -1054,16 +1089,22 @@ def policy_lint(
 ) -> None:
     """Lint policy files for schema + semantic issues without mutating the DB."""
     normalized_format = _normalize_choice_option(format, "--format", ("text", "json"))
+    json_output = normalized_format == "json"
 
     paths = _iter_policy_lint_paths(path, recursive=recursive)
     if not paths:
-        console.print("No policy files found")
-        raise typer.Exit(code=1)
+        _exit_with_error(
+            message="No policy files found",
+            error_code="policy_files_not_found",
+            exit_code=1,
+            json_output=json_output,
+            details={"path": str(path), "recursive": recursive},
+        )
 
     results = [_lint_policy_file(candidate) for candidate in paths]
     has_errors = any(not bool(item.get("ok")) for item in results)
 
-    if normalized_format == "json":
+    if json_output:
         payload = {
             "schema_version": 1,
             "path": str(path),
@@ -1072,6 +1113,11 @@ def policy_lint(
             "ok": not has_errors,
             "results": results,
         }
+        if has_errors:
+            payload["error"] = {
+                "code": "policy_lint_failed",
+                "message": "One or more policy files failed lint checks",
+            }
         typer.echo(_json_payload_text(payload), nl=False)
         if has_errors:
             raise typer.Exit(code=1)
@@ -1359,6 +1405,7 @@ def check(
         "--format",
         ("table", "json", "csv"),
     )
+    json_output = normalized_format == "json"
     db_path = _resolve_db_path_with_defaults(db)
     init_db(db_path)
     with connect(db_path) as conn:
@@ -1369,13 +1416,20 @@ def check(
         devices = [row["device_id"] for row in list_devices(conn)]
         if device_id:
             if not device_exists(conn, device_id):
-                console.print(f"[red]Unknown device: {device_id}[/red]")
-                raise typer.Exit(code=1)
+                _exit_with_error(
+                    message=f"Unknown device: {device_id}",
+                    error_code="device_not_found",
+                    json_output=json_output,
+                    details={"device_id": device_id},
+                )
             devices = [device_id]
 
         if not devices:
-            console.print("No devices found")
-            raise typer.Exit(code=1)
+            _exit_with_error(
+                message="No devices found",
+                error_code="no_devices_found",
+                json_output=json_output,
+            )
 
         results_payload = []
         for did in devices:
@@ -1396,11 +1450,15 @@ def check(
             )
             if assignment_mode and not policy_ids:
                 if device_id:
-                    console.print(
-                        f"No policies assigned to {did} "
-                        "(device assignments or matching tag assignments)"
+                    _exit_with_error(
+                        message=(
+                            f"No policies assigned to {did} "
+                            "(device assignments or matching tag assignments)"
+                        ),
+                        error_code="no_assigned_policies",
+                        json_output=json_output,
+                        details={"device_id": did},
                     )
-                    raise typer.Exit(code=1)
                 continue
 
             policy_results = []
@@ -1426,15 +1484,22 @@ def check(
 
             if not policy_results:
                 if device_id:
-                    console.print("No policies to evaluate")
-                    raise typer.Exit(code=1)
+                    _exit_with_error(
+                        message="No policies to evaluate",
+                        error_code="no_policies_to_evaluate",
+                        json_output=json_output,
+                        details={"device_id": did},
+                    )
                 continue
 
             results_payload.append({"device_id": did, "results": policy_results})
 
     if not results_payload:
-        console.print("No policies to evaluate")
-        raise typer.Exit(code=1)
+        _exit_with_error(
+            message="No policies to evaluate",
+            error_code="no_policies_to_evaluate",
+            json_output=json_output,
+        )
 
     if normalized_format == "table":
         if len(results_payload) > 1:
@@ -1523,14 +1588,24 @@ def report(
         "--format",
         ("table", "json", "csv", "junit", "sarif"),
     )
+    json_output = normalized_format == "json"
     normalized_sort_by = (resolved_sort_by or "").strip().lower()
     if normalized_sort_by not in {"name", "failed", "passed"}:
-        console.print("Invalid --sort-by value. Expected one of: name, failed, passed")
-        raise typer.Exit(code=2)
+        _exit_with_error(
+            message="Invalid --sort-by value. Expected one of: name, failed, passed",
+            error_code="invalid_sort_by",
+            exit_code=2,
+            json_output=json_output,
+            details={"allowed_values": ["name", "failed", "passed"]},
+        )
 
     if only_failing and only_skipped:
-        console.print("Options --only-failing and --only-skipped are mutually exclusive")
-        raise typer.Exit(code=1)
+        _exit_with_error(
+            message="Options --only-failing and --only-skipped are mutually exclusive",
+            error_code="mutually_exclusive_filters",
+            json_output=json_output,
+            details={"options": ["only_failing", "only_skipped"]},
+        )
 
     normalized_device_id = (device_id or "").strip() or None
     normalized_policy_id = (policy_id or "").strip() or None
@@ -1542,8 +1617,12 @@ def report(
         if normalized_policy_id:
             policy_row = get_policy(conn, normalized_policy_id)
             if policy_row is None:
-                console.print(f"Policy not found: {normalized_policy_id}")
-                raise typer.Exit(code=1)
+                _exit_with_error(
+                    message=f"Policy not found: {normalized_policy_id}",
+                    error_code="policy_not_found",
+                    json_output=json_output,
+                    details={"policy_id": normalized_policy_id},
+                )
             policy_rows = [policy_row]
         else:
             policy_rows = list_policies(conn)
@@ -1551,15 +1630,22 @@ def report(
         if normalized_device_id:
             device_row = get_device(conn, normalized_device_id)
             if device_row is None:
-                console.print(f"Device not found: {normalized_device_id}")
-                raise typer.Exit(code=1)
+                _exit_with_error(
+                    message=f"Device not found: {normalized_device_id}",
+                    error_code="device_not_found",
+                    json_output=json_output,
+                    details={"device_id": normalized_device_id},
+                )
             device_rows = [device_row]
         else:
             device_rows = list_devices(conn)
 
         if not policy_rows or not device_rows:
-            console.print("No data to report")
-            raise typer.Exit(code=1)
+            _exit_with_error(
+                message="No data to report",
+                error_code="no_report_data",
+                json_output=json_output,
+            )
 
         summary: dict[str, dict[str, Any]] = {}
         sarif_context: dict[str, dict[str, Any]] = {}
@@ -1708,7 +1794,10 @@ def history(
         "--format",
         ("table", "json", "csv"),
     )
-    normalized_since = _normalize_since_option(since)
+    normalized_since = _normalize_since_option(
+        since,
+        json_output=normalized_format == "json",
+    )
     db_path = _resolve_db_path_with_defaults(db)
     init_db(db_path)
     with connect(db_path) as conn:
@@ -1786,15 +1875,20 @@ def drift(
     )
     normalized_policy_id = (policy_id or "").strip() or None
     normalized_device_id = (device_id or "").strip() or None
-    normalized_since = _normalize_since_option(since)
+    json_output = normalized_format == "json"
+    normalized_since = _normalize_since_option(since, json_output=json_output)
 
     db_path = _resolve_db_path_with_defaults(db)
     init_db(db_path)
     with connect(db_path) as conn:
         runs = list_recent_runs(conn, 2, since=normalized_since)
         if len(runs) < 2:
-            console.print("Need at least two compliance runs to calculate drift")
-            raise typer.Exit(code=1)
+            _exit_with_error(
+                message="Need at least two compliance runs to calculate drift",
+                error_code="insufficient_runs",
+                json_output=json_output,
+                details={"required_runs": 2, "available_runs": len(runs)},
+            )
         latest_run = runs[0]["run_id"]
         previous_run = runs[1]["run_id"]
         latest = list_results_for_run(
@@ -2772,6 +2866,11 @@ def evidence_verify(
             "manifest_sha256_match": manifest_sha_match,
         },
     }
+    if errors:
+        report["error"] = {
+            "code": "evidence_verify_failed",
+            "message": errors[0],
+        }
 
     if normalized_format == "json":
         if output:

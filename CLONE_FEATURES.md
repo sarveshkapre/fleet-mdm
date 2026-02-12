@@ -8,7 +8,7 @@
 
 ## Candidate Features To Do
 - [ ] P2 - Security docs: add explicit threat model and trust boundaries for local-first deployment. Score: impact 3, effort 2, fit 4, differentiation 1, risk 1, confidence 4.
-- [ ] P2 - Reliability: add explicit error taxonomy (`code`, `message`) for JSON-mode failures. Score: impact 4, effort 3, fit 4, differentiation 2, risk 2, confidence 3.
+- [ ] P1 - Reliability: add explicit error taxonomy (`code`, `message`) for JSON-mode failures. Score: impact 5, effort 3, fit 5, differentiation 2, risk 2, confidence 4. (selected session 6)
 - [ ] P2 - CI reliability: pin Python patch version in workflow matrix and add periodic dependency update policy doc. Score: impact 3, effort 2, fit 4, differentiation 1, risk 1, confidence 4.
 - [ ] P3 - Performance: add microbench for report/drift with synthetic 10k-row history and index tuning follow-ups. Score: impact 3, effort 3, fit 3, differentiation 2, risk 2, confidence 3.
 - [ ] P3 - Security: redact high-risk fact keys by default (`serial`, `uuid`, hardware IDs) in strict evidence profile metadata docs. Score: impact 3, effort 2, fit 4, differentiation 2, risk 1, confidence 4.
@@ -23,6 +23,15 @@
 - [ ] P3 - Reliability: add `fleetmdm db backup` command using SQLite online backup API for safe local snapshots. Score: impact 3, effort 3, fit 4, differentiation 2, risk 2, confidence 3.
 - [ ] P3 - Reliability: add retention command for compliance history/runs (`fleetmdm history prune --before <ts>`). Score: impact 3, effort 3, fit 4, differentiation 2, risk 2, confidence 3.
 - [ ] P3 - Docs quality: split long command recipes into `docs/` pages and keep README within two-screen quickstart. Score: impact 2, effort 2, fit 4, differentiation 1, risk 1, confidence 4.
+- [ ] P3 - Reliability: centralize JSON error-code registry docs so automation can depend on stable `error.code` values. Score: impact 3, effort 2, fit 4, differentiation 1, risk 1, confidence 4.
+- [ ] P3 - Ops UX: add `--output` support to `history`/`drift`/`doctor` JSON surfaces for direct artifact generation. Score: impact 2, effort 2, fit 4, differentiation 1, risk 1, confidence 4.
+- [ ] P3 - Verification: add smoke target that validates one failing JSON path per machine-readable command. Score: impact 3, effort 2, fit 4, differentiation 1, risk 1, confidence 4.
+- [ ] P3 - Refactor: consolidate CLI option-validation failures into typed helpers to reduce drift in exit-code behavior. Score: impact 2, effort 2, fit 4, differentiation 1, risk 1, confidence 4.
+
+## Cycle 2 Selected Work (Locked 2026-02-12, Session 6)
+- [ ] P1 - Implement shared JSON failure envelope for machine-readable FleetMDM command errors.
+- [ ] P1 - Add regression tests for JSON-mode non-success payloads in core and evidence command surfaces.
+- [ ] P2 - Synchronize roadmap/docs/memory with verification evidence for this taxonomy rollout.
 
 ## Implemented
 - [x] 2026-02-12 - Security gate reliability: `make security` now runs `pip_audit` with writable cache path default (`PIP_AUDIT_CACHE_DIR=/tmp/pip-audit-cache`) to avoid sandbox permission failures. Evidence: `Makefile`, `PROJECT_MEMORY.md`.

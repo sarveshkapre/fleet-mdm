@@ -1575,6 +1575,8 @@ def test_policy_lint_directory_recursive_json_output(tmp_path: Path) -> None:
     payload = json.loads(result.stdout)
     assert payload["count"] == 2
     assert payload["ok"] is False
+    assert payload["error"]["code"] == "policy_lint_failed"
+    assert "failed lint checks" in payload["error"]["message"]
     by_name = {Path(item["path"]).name: item for item in payload["results"]}
     assert by_name["valid.yaml"]["ok"] is True
     assert by_name["invalid.yaml"]["ok"] is False
@@ -1652,6 +1654,79 @@ def test_core_commands_reject_invalid_format_consistently(tmp_path: Path) -> Non
         assert "Traceback" not in result.stdout
 
 
+def test_check_json_failure_has_error_taxonomy(tmp_path: Path) -> None:
+    db_path = tmp_path / "fleet.db"
+    result = runner.invoke(
+        app,
+        [
+            "check",
+            "--db",
+            str(db_path),
+            "--format",
+            "json",
+            "--device",
+            "missing-device",
+        ],
+    )
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "device_not_found"
+    assert "Unknown device: missing-device" == payload["error"]["message"]
+
+
+def test_report_json_failure_has_error_taxonomy(tmp_path: Path) -> None:
+    db_path = tmp_path / "fleet.db"
+    result = runner.invoke(
+        app,
+        ["report", "--db", str(db_path), "--format", "json", "--sort-by", "priority"],
+    )
+    assert result.exit_code == 2
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "invalid_sort_by"
+    assert payload["error"]["details"]["allowed_values"] == ["name", "failed", "passed"]
+
+
+def test_history_json_failure_has_error_taxonomy(tmp_path: Path) -> None:
+    db_path = tmp_path / "fleet.db"
+    result = runner.invoke(
+        app,
+        ["history", "--db", str(db_path), "--format", "json", "--since", "not-a-timestamp"],
+    )
+    assert result.exit_code == 2
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "invalid_since"
+
+
+def test_drift_json_failure_has_error_taxonomy(tmp_path: Path) -> None:
+    db_path = tmp_path / "fleet.db"
+    assert runner.invoke(app, ["seed", "--db", str(db_path)]).exit_code == 0
+    result = runner.invoke(app, ["drift", "--db", str(db_path), "--format", "json"])
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "insufficient_runs"
+    assert payload["error"]["details"]["required_runs"] == 2
+    assert payload["error"]["details"]["available_runs"] == 0
+
+
+def test_policy_lint_json_failure_has_error_taxonomy_for_empty_directory(tmp_path: Path) -> None:
+    policies_dir = tmp_path / "policies"
+    policies_dir.mkdir(parents=True, exist_ok=True)
+
+    result = runner.invoke(
+        app,
+        ["policy", "lint", str(policies_dir), "--format", "json"],
+    )
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "policy_files_not_found"
+    assert payload["error"]["details"]["recursive"] is False
+
+
 def test_evidence_verify_rejects_invalid_format_value(tmp_path: Path) -> None:
     bundle_dir = tmp_path / "bundle"
     bundle_dir.mkdir(parents=True, exist_ok=True)
@@ -1661,6 +1736,21 @@ def test_evidence_verify_rejects_invalid_format_value(tmp_path: Path) -> None:
     )
     assert result.exit_code == 2
     assert "Invalid --format value 'invalid'. Expected one of: text, json" in result.stdout
+
+
+def test_evidence_verify_json_failure_has_error_taxonomy(tmp_path: Path) -> None:
+    bundle_dir = tmp_path / "bundle"
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+
+    result = runner.invoke(
+        app,
+        ["evidence", "verify", str(bundle_dir), "--format", "json"],
+    )
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "evidence_verify_failed"
+    assert "manifest.json not found" in payload["error"]["message"]
 
 
 def test_policy_assignments_unmatched_tags_lists_stale_assignments(tmp_path: Path) -> None:

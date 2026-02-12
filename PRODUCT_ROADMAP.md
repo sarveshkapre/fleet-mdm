@@ -20,54 +20,56 @@
 ## Current Milestone
 - `M3 Reliability + Scale UX`
 
-## Session Goal Checkpoint (2026-02-12, Session 5)
+## Session Goal Checkpoint (2026-02-12, Session 6)
 - Goal (one sentence):
-  Ship the highest-value remaining M3 parity work by finalizing config-default behavior and delivering `policy lint` with reliable machine-readable output.
+  Ship explicit JSON failure taxonomy (`code`, `message`) for machine-readable FleetMDM command failures.
 - Success Criteria:
-  - `fleetmdm policy lint` works for file and directory inputs (recursive optional) with text/json output and semantic validation.
-  - Config defaults (`FLEETMDM_CONFIG` / `~/.fleetmdm/config.yaml`) are honored for DB path, report defaults, and evidence export defaults.
-  - Local validation (`make lint`, `make typecheck`, `pytest -q`) passes and docs/trackers are synchronized.
+  - Non-success JSON responses for `check`, `report`, `history`, `drift`, `policy lint`, and `evidence verify` include `error.code` and `error.message`.
+  - Text/table workflows keep current behavior (no regression in human-readable UX).
+  - Local verification gates (`make lint`, `make typecheck`, `pytest -q`, smoke path) pass and docs/trackers are synchronized.
 - Non-goals:
   - Optional read-only dashboard work.
-  - New agent/exporter data collection features.
-  - Release packaging automation changes.
+  - Exporter parity work (Linux secure-boot, extra macOS posture fields).
+  - Packaging automation and distribution-channel changes.
 - Selected Tasks (locked for this session):
-  - Deliver and test `policy lint` parity.
-  - Complete config-default resolution helpers and wire them to command surfaces.
-  - Keep invalid `--format` validation consistent with no traceback noise.
+  - Add shared JSON error-envelope helper and stable error codes.
+  - Wire non-success JSON-mode paths in `check`/`report`/`history`/`drift`/`policy lint` and evidence verification.
+  - Add regression tests and update docs/trackers.
 
-## Product Phase Checkpoint (2026-02-12, Session 5)
+## Product Phase Checkpoint (2026-02-12, Session 6)
 - Are we in a good product phase yet? `No`.
 - Best-in-market references (bounded market scan, untrusted):
-  - Microsoft Intune compliance monitoring: https://learn.microsoft.com/en-us/intune/intune-service/protect/compliance-policy-monitor
-  - Microsoft Intune export report APIs: https://learn.microsoft.com/en-us/intune/intune-service/fundamentals/reports-export-graph-apis
-  - Jamf compliance benchmark workflows: https://www.jamf.com/blog/how-to-build-compliance-benchmarks-for-your-organization/
-  - Kandji managed-device custom reports by blueprint/tag: https://support.kandji.io/kb/create-custom-reports-with-managed-devices-by-blueprint-and-tag
-  - Fleet REST API report export surfaces: https://fleetdm.com/docs/rest-api/rest-api#post-api-v1-fleet-hosts-report
+  - Microsoft Intune compliance monitoring surface (device/policy compliance state): https://learn.microsoft.com/en-us/intune/intune-service/protect/compliance-policy-monitor
+  - Microsoft Intune export/report API expectations for automation pipelines: https://learn.microsoft.com/en-us/intune/intune-service/fundamentals/reports-export-graph-apis
+  - Jamf compliance benchmark reporting/export expectations: https://support.jamf.com/en/articles/10932419-compliance-benchmarks-faq
+  - Fleet REST API report export baseline (`hosts/report` CSV): https://fleetdm.com/docs/rest-api
+  - Kandji tag-based scoping baseline for device cohorts: https://support.kandji.io/kb/tags-for-devices
 
-## Parity Gap Map (2026-02-12, Session 5)
+## Parity Gap Map (2026-02-12, Session 6)
 - Missing:
-  - JSON-mode error taxonomy (`code`, `message`) for non-success machine-readable command failures.
+  - Explicit JSON error taxonomy for failed machine-readable command paths.
   - Exporter parity for Linux secure-boot posture in examples/schema guidance.
 - Weak:
-  - Default strict-profile redaction posture docs for high-risk identifiers.
+  - Strict-profile redaction defaults/trust-boundary docs for high-risk identifiers.
   - Synthetic large-fleet benchmark evidence for `report`/`history`/`drift`.
 - Parity:
-  - Config defaults for `db`, `report.*`, and `evidence_export.*` are now available.
-  - Policy preflight quality gate (`policy lint`) now covers schema + semantic checks before DB mutation.
-  - Assignment-aware checks/reporting, drift/history filters, and JSON/JUnit/SARIF outputs are in place.
+  - Config defaults for `db`, `report.*`, and `evidence_export.*`.
+  - Policy preflight quality gate (`policy lint`) with schema + semantic checks.
+  - Assignment-aware checks/reporting, drift/history filters, and JSON/JUnit/SARIF outputs.
 - Differentiator:
   - Local-first evidence trust pipeline (manifest + optional signature + verify) with no hosted dependency.
 
-## Brainstormed Candidates (Ranked 2026-02-12, Session 5)
-- 1) Config defaults for repeated operator workflows (`db`, `report.*`, `evidence_export.*`). Score: impact 4, effort 3, fit 5, differentiation 2, risk 2, confidence 4. (selected)
-- 2) Policy quality gate (`policy lint` with semantic checks + JSON output). Score: impact 4, effort 3, fit 5, differentiation 2, risk 2, confidence 4. (selected)
-- 3) Invalid `--format` normalization and traceback suppression consistency. Score: impact 4, effort 2, fit 5, differentiation 1, risk 1, confidence 4. (selected)
-- 4) JSON failure taxonomy (`code`, `message`) across machine-readable surfaces. Score: impact 4, effort 3, fit 4, differentiation 2, risk 2, confidence 3.
-- 5) Strict redaction defaults/trust-boundary docs for high-risk identifiers. Score: impact 3, effort 2, fit 4, differentiation 2, risk 1, confidence 4.
-- 6) Linux secure-boot exporter parity and schema guidance. Score: impact 3, effort 3, fit 4, differentiation 2, risk 2, confidence 3.
-- 7) Synthetic large-fleet benchmark + index tuning follow-up. Score: impact 3, effort 3, fit 3, differentiation 2, risk 2, confidence 3.
-- 8) Packaging docs (Homebrew/Nix + checksum verification). Score: impact 2, effort 3, fit 3, differentiation 1, risk 1, confidence 3.
+## Brainstormed Candidates (Ranked 2026-02-12, Session 6)
+- 1) JSON failure taxonomy (`code`, `message`) across JSON command failures. Score: impact 5, effort 3, fit 5, differentiation 2, risk 2, confidence 4. (selected)
+- 2) Strict redaction defaults/trust-boundary docs for high-risk identifiers. Score: impact 4, effort 2, fit 4, differentiation 2, risk 1, confidence 4.
+- 3) Linux secure-boot exporter parity + schema guidance. Score: impact 4, effort 3, fit 4, differentiation 2, risk 2, confidence 3.
+- 4) `report --output <file>` direct artifact writing for CI operators. Score: impact 3, effort 2, fit 4, differentiation 1, risk 1, confidence 4.
+- 5) `evidence verify --strict` to fail on warnings in pipelines. Score: impact 3, effort 2, fit 4, differentiation 1, risk 1, confidence 4.
+- 6) `history prune --before <ts>` retention tooling for local DB lifecycle control. Score: impact 3, effort 3, fit 4, differentiation 2, risk 2, confidence 3.
+- 7) `db backup` command using SQLite online backup API. Score: impact 3, effort 3, fit 4, differentiation 2, risk 2, confidence 3.
+- 8) Synthetic 10k-row benchmark harness for report/drift/history tuning evidence. Score: impact 3, effort 3, fit 3, differentiation 2, risk 2, confidence 3.
+- 9) Packaging docs (Homebrew/Nix + checksum verification). Score: impact 2, effort 3, fit 3, differentiation 1, risk 1, confidence 3.
+- 10) Optional read-only dashboard for triage/evidence status. Score: impact 2, effort 5, fit 3, differentiation 3, risk 3, confidence 2.
 
 ## Pending Features
 - [ ] `P2` Reliability: explicit JSON failure taxonomy (`code`, `message`) for machine-readable command failures.
@@ -77,16 +79,15 @@
 - [ ] `P3` Packaging docs: Homebrew/Nix install + checksum verification guidance.
 - [ ] `P3` Optional read-only dashboard.
 
-## Pending Feature Check (2026-02-12, Session 5)
+## Pending Feature Check (2026-02-12, Session 6)
 - Question: What features are still pending?
 - Answer: JSON error taxonomy, strict redaction defaults/docs, exporter parity, benchmark/tuning follow-up, packaging docs, and optional dashboard.
 
-## Cycle 1 Locked Work (Session 5)
-- [x] Implement `policy lint` (file/directory recursive linting, semantic checks, text/json output).
-- [x] Complete config-default resolution (`db`, `report.*`, `evidence_export.*`) and wire command usage.
-- [x] Keep invalid `--format` output consistent with explicit bad value and exit code `2`.
-- [x] Harden `make security` cache-path reliability by defaulting `pip_audit` cache to a writable location (`/tmp/pip-audit-cache`).
-- [x] Update tests/docs/trackers and run local verification gates.
+## Cycle 2 Locked Work (Session 6)
+- [ ] Add shared JSON failure envelope (`code`, `message`) for machine-readable command errors.
+- [ ] Wire JSON failure payloads for `check`/`report`/`history`/`drift`/`policy lint` and evidence verify.
+- [ ] Add/adjust regression tests for JSON-mode non-success paths.
+- [ ] Update docs/trackers and record full verification evidence.
 
 ## Delivered Features
 - 2026-02-12: `make security` now runs `pip_audit` with configurable writable cache path (`PIP_AUDIT_CACHE_DIR`, default `/tmp/pip-audit-cache`) to avoid sandbox permission failures.

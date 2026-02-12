@@ -13,6 +13,42 @@
 - Trust Label:
   `trusted` for local code/tests/smoke; `untrusted` for external market references.
 
+## 2026-02-12 - Cycle 2 - Session 6 Pre-Implementation Checkpoint
+- Session Goal:
+  Deliver explicit JSON failure taxonomy (`error.code`, `error.message`) for machine-readable FleetMDM command failures.
+- Success Criteria:
+  - JSON-mode non-success paths in `check`, `report`, `history`, `drift`, `policy lint`, and `evidence verify` include stable error code/message payloads.
+  - Human-readable mode behavior remains unchanged.
+  - `make lint`, `make typecheck`, `pytest -q`, and a local smoke path pass.
+- Non-goals:
+  - Optional read-only dashboard work.
+  - Exporter parity enhancements (Linux secure-boot/macOS additional posture facts).
+  - Packaging/distribution automation updates.
+- Planned Tasks (locked):
+  - Add shared helper for JSON error envelopes and map stable error codes.
+  - Wire JSON-mode error payloads across core command failure paths plus evidence verify.
+  - Add regression tests and synchronize roadmap/backlog/docs after validation.
+- Product Phase Checkpoint:
+  - Are we in a good product phase yet? `No`.
+  - Best-in-market baseline features: compliance monitors, export/report APIs, scoped targeting by tags/groups, and automation-friendly machine-readable failure contracts.
+- Brainstormed Candidates (ranked):
+  - 1) JSON failure taxonomy (`code`, `message`) across JSON command failures. Score: impact 5, effort 3, fit 5, differentiation 2, risk 2, confidence 4. (selected)
+  - 2) Strict redaction defaults/trust-boundary docs for high-risk identifiers. Score: impact 4, effort 2, fit 4, differentiation 2, risk 1, confidence 4.
+  - 3) Linux secure-boot exporter parity + schema guidance. Score: impact 4, effort 3, fit 4, differentiation 2, risk 2, confidence 3.
+  - 4) `report --output` artifact convenience for CI operators. Score: impact 3, effort 2, fit 4, differentiation 1, risk 1, confidence 4.
+  - 5) `evidence verify --strict` warning gate for pipelines. Score: impact 3, effort 2, fit 4, differentiation 1, risk 1, confidence 4.
+- Pending Feature Prompt:
+  - Question: What features are still pending?
+  - Answer: JSON failure taxonomy, strict redaction defaults/docs, exporter parity, benchmark/tuning follow-up, packaging docs, and optional dashboard remain open.
+- Market Scan (bounded, untrusted):
+  - Intune compliance monitor: https://learn.microsoft.com/en-us/intune/intune-service/protect/compliance-policy-monitor
+  - Intune export/report API: https://learn.microsoft.com/en-us/intune/intune-service/fundamentals/reports-export-graph-apis
+  - Jamf compliance benchmark FAQ: https://support.jamf.com/en/articles/10932419-compliance-benchmarks-faq
+  - Fleet REST API docs: https://fleetdm.com/docs/rest-api
+  - Kandji tags for devices: https://support.kandji.io/kb/tags-for-devices
+- Trust Label:
+  `trusted` for local repository analysis and planned tasks; `untrusted` for external market references.
+
 ## 2026-02-11 - Cycle 1 - Assignment-Scoped Reporting + Drift Membership Deltas
 - Recent Decisions:
   Ship two roadmap items together: add `fleetmdm report --only-assigned` to force assignment-scoped report evaluation, and add `fleetmdm drift --include-new-missing` to include policy/device pairs present in only one of the compared runs.
